@@ -1,0 +1,48 @@
+name: CI
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dispatch:
+    name: Pure dispatch tests (no DuckDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug && cmake --build build && ctest --test-dir build --output-on-failure
+
+  probe:
+    # Every helper instantiated against the REAL headers of each DuckDB line we
+    # ship for. Add a line here when DuckDB (or community-extensions'
+    # DUCKDB_LATEST_STABLE) moves.
+    name: Probe (${{ matrix.line }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - line: v1.4.5 LTS
+            ref: v1.4.5
+          - line: v1.5.6
+            ref: v1.5.6
+          - line: v2.0 (community-extensions default)
+            ref: b15358c371daf10dad799a43b6167f6ccdce84d8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: duckdb/duckdb
+          ref: ${{ matrix.ref }}
+          path: duckdb
+          sparse-checkout: src/include
+      - run: g++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include test/probe.cpp

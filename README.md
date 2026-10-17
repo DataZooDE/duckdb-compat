@@ -39,6 +39,16 @@ submodules when it builds.
 | `dc::TryGetSetting(opener, key, v)` | `FileOpener::TryGetCurrentSetting(opener, key, v)` | same, with `Identifier(key)` |
 | `dc::BindNames` | `vector<string>` | `vector<Identifier>`; fill it with `emplace_back` |
 | `dc::ExecuteUnaryNullable<INPUT_TYPE, RESULT_TYPE>(in, out, n, f)` | `UnaryExecutor::ExecuteWithNulls` | `UnaryExecutor::Execute` returning `optional<RESULT_TYPE>` |
+| `dc::CopyBindNames` | `vector<string>` | `vector<Identifier>`; declare COPY TO bind `names` as `const dc::CopyBindNames &` |
+| `dc::FunctionName(s)` | `s` | `Identifier(s)`: function constructors take `Identifier`, explicit from `std::string` (literals still convert) |
+| `dc::AddNamedParameter(fn, name, type)` | `fn.named_parameters[name] = type` | typed `**options` kwargs (`WithTypedKwargs`/`ExtendTypedKwargs`), as `read_csv` does. Not `AddKeywordOnly`: without a default that makes the parameter **required** |
+| `dc::FindNamedParameter(input.named_parameters, name)` | `case_insensitive_map_t` lookup | `InsertionOrderPreservingMap` keyed by `Identifier`; returns `const Value*`, nullptr if not passed |
+| `dc::NameParameters(fn, {"path", ...})` | no-op: `FunctionDescription::parameter_names` names them | renames the signature's positional parameters, which `duckdb_functions()` prefers (else `col0`, `col1`, ...) |
+| `dc::ForEachFunction(set, [](T &fun) {...})` | loop over `set.functions` (`vector<T>`) | `set.ApplyToFunctions(...)`: `functions` holds immutable `shared_ptr<const T>` |
+| `dc::ResultNames(result)` | `result.names` | `result.GetNames()` (Identifiers), as strings |
+| `dc::FetchRows(result)` | `Fetch()` loop | same; 2.0 has no `MaterializedQueryResult` and no `GetValue(col, row)`. Hold results as `unique_ptr<QueryResult>` |
+| `dc::TryCastValue(v, type, out, &err, strict)` | `DefaultTryCastAs(type, out, err, strict)` | `DefaultTryCastAs(type, err, strict)` returning `optional<Value>` |
+| `dc::ScalarMacroInfo(schema, name, "(a, b := 1) AS a + b")` | parses that `CREATE MACRO` | `DefaultMacro {schema, name, definition}` + `CreateInternalMacroInfo`. Table macros (`DefaultTableMacro`) are unchanged |
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 | `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |

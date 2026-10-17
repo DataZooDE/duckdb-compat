@@ -46,12 +46,17 @@ jobs:
           repository: duckdb/duckdb
           ref: ${{ matrix.ref }}
           path: duckdb
-          sparse-checkout: src/include
+          sparse-checkout: |
+            src/include
+            third_party/httplib
       - name: Probe with g++ (Windows' IN/OUT/OPTIONAL macros simulated)
         if: runner.os == 'Linux'
         run: |
           g++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include test/probe.cpp
           g++ -std=c++17 -fsyntax-only -Wall -DIN= -DOUT= -DOPTIONAL= -Iinclude -Iduckdb/src/include test/probe.cpp
+      - name: Probe httplib helpers (bundled httplib + OpenSSL)
+        if: runner.os == 'Linux'
+        run: g++ -std=c++17 -fsyntax-only -Iinclude -Iduckdb/src/include -Iduckdb/third_party/httplib test/probe_httplib.cpp
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
       - name: Probe with MSVC (real <windows.h>)

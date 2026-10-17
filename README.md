@@ -41,6 +41,20 @@ submodules when it builds.
 | `dc::ExecuteUnaryNullable<INPUT_TYPE, RESULT_TYPE>(in, out, n, f)` | `UnaryExecutor::ExecuteWithNulls` | `UnaryExecutor::Execute` returning `optional<RESULT_TYPE>` |
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
+| `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |
+
+**macOS on 2.0:** the bundled httplib reads the keychain whenever it is built
+with OpenSSL, so an extension that uses `duckdb_httplib_openssl` must link
+`-framework CoreFoundation -framework Security`, or linking fails with
+`_SecTrustSettingsCopyCertificates` undefined:
+
+```cmake
+if(APPLE)
+  foreach(t ${EXTENSION_NAME} ${LOADABLE_EXTENSION_NAME})
+    target_link_libraries(${t} "-framework CoreFoundation" "-framework Security")
+  endforeach()
+endif()
+```
 
 ## How it works
 

@@ -157,13 +157,23 @@ inline FunctionNameType FunctionName(const std::string &name) {
 }
 
 // --- Named parameters of a table function ------------------------------------
-// Before 2.0: fn.named_parameters[name] = type. 2.0: named parameters are part
-// of the signature, fn.GetSignature().AddKeywordOnly(name, type).
+// Before 2.0: fn.named_parameters[name] = type -- optional; a call that leaves
+// it out does not pass it. 2.0: named parameters are part of the signature.
+// AddKeywordOnly(name, type) would make the parameter REQUIRED (a keyword-only
+// parameter without a default, as in Python), so every call omitting it fails
+// to bind. The 1.x semantics are 2.0's typed "**kwargs" -- what read_csv uses:
+// one "**options" schema per function, extended per parameter.
 namespace detail {
 template <class FN>
 auto AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalType &type, int)
-    -> decltype(fn.GetSignature().AddKeywordOnly(FunctionNameType(name), type), void()) {
-	fn.GetSignature().AddKeywordOnly(FunctionNameType(name), type);
+    -> decltype(fn.GetSignature().GetTypedKwargs(), void()) {
+	auto &signature = fn.GetSignature();
+	auto add = [&](auto &kwargs) { kwargs.Add(FunctionNameType(name), type); };
+	if (signature.GetTypedKwargs()) {
+		signature.ExtendTypedKwargs(add);
+	} else {
+		signature.WithTypedKwargs(FunctionNameType("options"), add);
+	}
 }
 template <class FN>
 void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalType &type, long) {
@@ -171,7 +181,9 @@ void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalTyp
 }
 } // namespace detail
 
-//! Declare a named (keyword-only) parameter on a table function.
+//! Declare an optional named parameter on a table function: a call may leave
+//! it out, and then the bind input does not carry it (FindNamedParameter
+//! returns nullptr).
 template <class FN>
 void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalType &type) {
 	detail::AddNamedParameter(fn, name, type, 0);
@@ -185,6 +197,61 @@ template <class MAP>
 const duckdb::Value *FindNamedParameter(const MAP &map, const std::string &name) {
 	auto entry = map.find(typename MAP::key_type(name));
 	return entry == map.end() ? nullptr : &entry->second;
+}
+
+// --- Parameter names shown by duckdb_functions() -------------------------------
+// Before 2.0 they come from FunctionDescription::parameter_names. 2.0 prefers
+// the signature's own names, and positional parameters made by the
+// TableFunction/ScalarFunction constructors are named col0, col1, ... -- so the
+// documented names never show. Name the positional parameters in the signature.
+namespace detail {
+template <class FN>
+auto NameParameters(FN &fn, const std::vector<std::string> &names, int)
+    -> decltype(fn.GetSignature().GetParameter(0).SetName(FunctionNameType(std::string())), void()) {
+	auto &signature = fn.GetSignature();
+	for (duckdb::idx_t i = 0; i < signature.GetParameterCount() && i < names.size(); i++) {
+		auto &param = signature.GetParameter(i);
+		if (!param.AcceptsPosition()) {
+			break;
+		}
+		param.SetName(FunctionNameType(names[i]));
+	}
+}
+// Old lines: a no-op -- but only for an actual function (it has a `name`), so
+// passing something else (e.g. a 2.0 set's shared_ptr overload) fails to
+// compile instead of silently doing nothing.
+template <class FN>
+auto NameParameters(FN &fn, const std::vector<std::string> &, long) -> decltype((void)fn.name, void()) {
+}
+} // namespace detail
+
+//! Name a function's positional parameters (as FunctionDescription::
+//! parameter_names does before 2.0, where this is a no-op).
+template <class FN>
+void NameParameters(FN &fn, const std::vector<std::string> &names) {
+	detail::NameParameters(fn, names, 0);
+}
+
+// --- Changing every overload of a function set ---------------------------------
+// Before 2.0: set.functions is vector<T>, mutable in place. 2.0: it holds
+// immutable shared_ptr<const T>, changed only through ApplyToFunctions().
+namespace detail {
+template <class SET, class F>
+auto ForEachFunction(SET &set, F &&f, int) -> decltype(set.ApplyToFunctions(f), void()) {
+	set.ApplyToFunctions(f);
+}
+template <class SET, class F>
+void ForEachFunction(SET &set, F &&f, long) {
+	for (auto &fun : set.functions) {
+		f(fun);
+	}
+}
+} // namespace detail
+
+//! Call f(T &fun) on every overload of a function set, so the change sticks.
+template <class SET, class F>
+void ForEachFunction(SET &set, F &&f) {
+	detail::ForEachFunction(set, std::forward<F>(f), 0);
 }
 
 // --- Query results --------------------------------------------------------------

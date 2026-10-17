@@ -65,7 +65,9 @@ void ProbeFunctions() {
 	TableFunctionSet set(duckdb_compat::FunctionName(name));
 	TableFunction tf(duckdb_compat::FunctionName(name), {LogicalType::VARCHAR}, nullptr, ProbeBind);
 	duckdb_compat::AddNamedParameter(tf, "framing", LogicalType::VARCHAR);
+	duckdb_compat::NameParameters(tf, {"path"});
 	set.AddFunction(tf);
+	duckdb_compat::ForEachFunction(set, [](TableFunction &fun) { duckdb_compat::NameParameters(fun, {"path"}); });
 	CopyFunction cf("probe");
 	cf.copy_to_bind = ProbeCopyBind;
 	(void)ProbeBindInput;

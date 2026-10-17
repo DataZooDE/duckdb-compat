@@ -16,6 +16,13 @@
 #include "duckdb/parser/parser.hpp"
 #include "duckdb/parser/parsed_data/create_macro_info.hpp"
 #include "duckdb/parser/statement/create_statement.hpp"
+#include "duckdb/parser/constraints/unique_constraint.hpp"
+#include "duckdb/parser/qualified_name.hpp"
+#include "duckdb/catalog/catalog.hpp"
+#include "duckdb/catalog/entry_lookup_info.hpp"
+#include "duckdb/planner/expression/bound_conjunction_expression.hpp"
+#include "duckdb/planner/expression/bound_constant_expression.hpp"
+#include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include "duckdb_compat/dispatch.hpp"
 
 #include <optional>
@@ -27,6 +34,12 @@
 #if __has_include("duckdb/common/identifier.hpp")
 #include "duckdb/common/identifier.hpp"
 #define DUCKDB_COMPAT_HAS_IDENTIFIER 1
+#endif
+
+// 2.0: vectors carry their own size; count_t is the explicit row-count type
+#if __has_include("duckdb/common/types/size.hpp")
+#include "duckdb/common/types/size.hpp"
+#define DUCKDB_COMPAT_HAS_COUNT_T 1
 #endif
 
 namespace duckdb_compat {
@@ -337,9 +350,12 @@ auto ScalarMacroInfo(const char *schema, const char *name, const char *definitio
 	DM macro {schema, name, definition};
 	return duckdb::DefaultFunctionGenerator::CreateInternalMacroInfo(macro);
 }
-template <class INFO = duckdb::CreateMacroInfo>
+// P is a template parameter so that the default-constructed Parser (gone on
+// 2.0) is only looked up when this overload is instantiated: clang rejects a
+// non-dependent use at definition time.
+template <class INFO = duckdb::CreateMacroInfo, class P = duckdb::Parser>
 duckdb::unique_ptr<INFO> ScalarMacroInfo(const char *schema, const char *name, const char *definition, long) {
-	duckdb::Parser parser;
+	P parser;
 	parser.ParseQuery(std::string("CREATE MACRO __duckdb_compat_macro__") + definition);
 	if (parser.statements.size() != 1 || parser.statements[0]->type != duckdb::StatementType::CREATE_STATEMENT) {
 		throw duckdb::InternalException("ScalarMacroInfo: '%s' is not a macro definition", definition);
@@ -359,6 +375,371 @@ duckdb::unique_ptr<INFO> ScalarMacroInfo(const char *schema, const char *name, c
 inline duckdb::unique_ptr<duckdb::CreateMacroInfo> ScalarMacroInfo(const char *schema, const char *name,
                                                                    const char *definition) {
 	return detail::ScalarMacroInfo(schema, name, definition, 0);
+}
+
+// --- Catalog identifiers ------------------------------------------------------------
+// Catalog, schema, table and column names are std::string on 1.4. 1.5.6 has an
+// Identifier type that converts implicitly to and from std::string (a backport
+// so that 2.0 spellings compile). On 2.0 both conversions are explicit, and
+// catalog APIs take and return Identifier.
+#ifdef DUCKDB_COMPAT_HAS_IDENTIFIER
+using IdentifierType = duckdb::Identifier;
+#else
+using IdentifierType = std::string;
+#endif
+
+//! A runtime string as the identifier type catalog APIs take: pass the result
+//! wherever 2.0 wants an Identifier (Catalog::GetCatalogEntry, GetSchema,
+//! ColumnList::GetColumn, ColumnDefinition, ...). For the reverse direction use
+//! Str().
+inline IdentifierType Ident(const std::string &name) {
+	return IdentifierType(name);
+}
+
+//! A list of names (std::string or Identifier) as std::strings.
+template <class C>
+std::vector<std::string> Strs(const C &names) {
+	std::vector<std::string> result;
+	result.reserve(names.size());
+	for (auto &name : names) {
+		result.emplace_back(::duckdb_compat::Str(name));
+	}
+	return result;
+}
+
+//! A list of strings as identifiers.
+inline std::vector<IdentifierType> Idents(const std::vector<std::string> &names) {
+	std::vector<IdentifierType> result;
+	result.reserve(names.size());
+	for (auto &name : names) {
+		result.emplace_back(name);
+	}
+	return result;
+}
+
+// --- UNIQUE / PRIMARY KEY constraints over named columns --------------------------
+// UniqueConstraint(vector<string>, bool) before 2.0, (vector<Identifier>, bool)
+// on 2.0 -- and on 1.5.6 a vector<Identifier> does not convert to vector<string>.
+namespace detail {
+template <class UC>
+auto MakeUniqueConstraint(std::vector<std::string> &columns, bool is_primary_key, int)
+    -> decltype(UC(std::declval<std::vector<IdentifierType>>(), is_primary_key), duckdb::unique_ptr<UC>()) {
+	return duckdb::make_uniq<UC>(Idents(columns), is_primary_key);
+}
+template <class UC>
+duckdb::unique_ptr<UC> MakeUniqueConstraint(std::vector<std::string> &columns, bool is_primary_key, long) {
+	return duckdb::make_uniq<UC>(std::move(columns), is_primary_key);
+}
+} // namespace detail
+
+//! A UNIQUE (or PRIMARY KEY) constraint over the named columns.
+inline duckdb::unique_ptr<duckdb::UniqueConstraint> MakeUniqueConstraint(std::vector<std::string> columns,
+                                                                        bool is_primary_key) {
+	return detail::MakeUniqueConstraint<duckdb::UniqueConstraint>(columns, is_primary_key, 0);
+}
+
+// --- Qualified names of CreateInfo / DropInfo ---------------------------------------
+// 1.4: public `catalog`/`schema` fields plus a per-type name field (`table`,
+// `name`, `view_name`). 1.5.6: the same fields plus 2.0-style setters
+// (SetQualifiedName, CreateInfo::SetSchema/SetCatalog). 2.0: one private
+// QualifiedName behind those setters, taking Identifiers.
+namespace detail {
+template <int N>
+struct Rank : Rank<N - 1> {};
+template <>
+struct Rank<0> {};
+
+template <class INFO>
+auto SetEntryNameField(INFO &info, const std::string &name, Rank<2>) -> decltype(info.table = name, void()) {
+	info.table = name;
+}
+template <class INFO>
+auto SetEntryNameField(INFO &info, const std::string &name, Rank<1>) -> decltype(info.view_name = name, void()) {
+	info.view_name = name;
+}
+template <class INFO>
+auto SetEntryNameField(INFO &info, const std::string &name, Rank<0>) -> decltype(info.name = name, void()) {
+	info.name = name;
+}
+
+template <class INFO, class QN = duckdb::QualifiedName>
+auto SetQualifiedName(INFO &info, const std::string &catalog, const std::string &schema, const std::string &name, int)
+    -> decltype(info.SetQualifiedName(QN(Ident(catalog), Ident(schema), Ident(name))), void()) {
+	info.SetQualifiedName(QN(Ident(catalog), Ident(schema), Ident(name)));
+}
+template <class INFO>
+void SetQualifiedName(INFO &info, const std::string &catalog, const std::string &schema, const std::string &name,
+                      long) {
+	info.catalog = catalog;
+	info.schema = schema;
+	SetEntryNameField(info, name, Rank<2>());
+}
+
+template <class INFO>
+auto SetSchema(INFO &info, const std::string &schema, int) -> decltype(info.SetSchema(Ident(schema)), void()) {
+	info.SetSchema(Ident(schema));
+}
+template <class INFO>
+void SetSchema(INFO &info, const std::string &schema, long) {
+	info.schema = schema;
+}
+
+template <class INFO>
+auto SetCatalog(INFO &info, const std::string &catalog, int) -> decltype(info.SetCatalog(Ident(catalog)), void()) {
+	info.SetCatalog(Ident(catalog));
+}
+template <class INFO>
+void SetCatalog(INFO &info, const std::string &catalog, long) {
+	info.catalog = catalog;
+}
+} // namespace detail
+
+//! Set catalog, schema and entry name of a CreateInfo subclass (table, view,
+//! sequence, ...) or a DropInfo.
+template <class INFO>
+void SetQualifiedName(INFO &info, const std::string &catalog, const std::string &schema, const std::string &name) {
+	detail::SetQualifiedName(info, catalog, schema, name, 0);
+}
+
+//! Set only the schema of a CreateInfo / DropInfo (for CreateSchemaInfo: the
+//! schema being created).
+template <class INFO>
+void SetSchema(INFO &info, const std::string &schema) {
+	detail::SetSchema(info, schema, 0);
+}
+
+//! Set only the catalog of a CreateInfo / DropInfo.
+template <class INFO>
+void SetCatalog(INFO &info, const std::string &catalog) {
+	detail::SetCatalog(info, catalog, 0);
+}
+
+// --- Catalog entry lookups ----------------------------------------------------------
+// 2.0 folds catalog and schema into a QualifiedName: the (schema, name)
+// overloads are deprecated and EntryLookupInfo wants a QualifiedName. 1.5.6
+// already has the static Catalog::GetEntry<T>(context, QualifiedName, ...).
+
+//! True when EntryLookupInfo takes a QualifiedName (2.0)
+using EntryLookupTakesQualifiedName =
+    std::integral_constant<bool, std::is_constructible<duckdb::EntryLookupInfo, duckdb::CatalogType,
+                                                       const duckdb::QualifiedName &>::value>;
+
+namespace detail {
+template <class QN = duckdb::QualifiedName>
+QN EntryName(const std::string &name, std::true_type) {
+	return QN(Ident(name));
+}
+inline const std::string &EntryName(const std::string &name, std::false_type) {
+	return name;
+}
+} // namespace detail
+
+//! The name argument of EntryLookupInfo(type, EntryName(name), ...): a
+//! QualifiedName by value on 2.0; before 2.0 `name` itself -- EntryLookupInfo
+//! keeps a *reference* to its name there, so `name` must outlive the lookup
+//! (never pass a temporary).
+inline auto EntryName(const std::string &name)
+    -> decltype(detail::EntryName(name, EntryLookupTakesQualifiedName())) {
+	return detail::EntryName(name, EntryLookupTakesQualifiedName());
+}
+
+// The instance lookups within one catalog by (schema, name) or (schema,
+// EntryLookupInfo) still exist on 2.0, deprecated in favour of folding the
+// schema into the lookup -- whose non-deprecated form is static and resolves the
+// catalog by name instead. These wrappers keep the instance semantics on every
+// line with the deprecation silenced in one place.
+#if defined(__GNUC__) || defined(__clang__)
+#define DUCKDB_COMPAT_PUSH_NO_DEPRECATED                                                                             \
+	_Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define DUCKDB_COMPAT_POP_NO_DEPRECATED _Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+#define DUCKDB_COMPAT_PUSH_NO_DEPRECATED __pragma(warning(push)) __pragma(warning(disable : 4996))
+#define DUCKDB_COMPAT_POP_NO_DEPRECATED __pragma(warning(pop))
+#else
+#define DUCKDB_COMPAT_PUSH_NO_DEPRECATED
+#define DUCKDB_COMPAT_POP_NO_DEPRECATED
+#endif
+
+//! catalog.GetEntry<T>(context, schema, name, if_not_found): the entry in this
+//! catalog, or nullptr.
+template <class T>
+duckdb::optional_ptr<T> GetEntry(duckdb::Catalog &catalog, duckdb::ClientContext &context, const std::string &schema,
+                                 const std::string &name,
+                                 duckdb::OnEntryNotFound if_not_found = duckdb::OnEntryNotFound::RETURN_NULL) {
+	DUCKDB_COMPAT_PUSH_NO_DEPRECATED
+	return catalog.GetEntry<T>(context, Ident(schema), Ident(name), if_not_found);
+	DUCKDB_COMPAT_POP_NO_DEPRECATED
+}
+
+//! catalog.GetEntry(context, schema, lookup, if_not_found): `lookup` (type,
+//! name, AT clause) within one schema of this catalog.
+inline duckdb::optional_ptr<duckdb::CatalogEntry> GetEntryInSchema(duckdb::Catalog &catalog,
+                                                                   duckdb::ClientContext &context,
+                                                                   const std::string &schema,
+                                                                   const duckdb::EntryLookupInfo &lookup,
+                                                                   duckdb::OnEntryNotFound if_not_found) {
+	DUCKDB_COMPAT_PUSH_NO_DEPRECATED
+	return catalog.GetEntry(context, Ident(schema), lookup, if_not_found);
+	DUCKDB_COMPAT_POP_NO_DEPRECATED
+}
+
+// --- Constant vectors -----------------------------------------------------------------
+// 2.0 vectors carry their own size: Vector(Value) and Vector::Reference(Value)
+// take the row count (count_t, explicit from idx_t).
+namespace detail {
+#ifdef DUCKDB_COMPAT_HAS_COUNT_T
+template <class V>
+auto ReferenceValue(V &vector, const duckdb::Value &value, duckdb::idx_t count, int)
+    -> decltype(vector.Reference(value, duckdb::count_t(count)), void()) {
+	vector.Reference(value, duckdb::count_t(count));
+}
+#endif
+template <class V>
+void ReferenceValue(V &vector, const duckdb::Value &value, duckdb::idx_t, long) {
+	vector.Reference(value);
+}
+
+#ifdef DUCKDB_COMPAT_HAS_COUNT_T
+template <class V>
+auto MakeValueVector(const duckdb::Value &value, duckdb::idx_t count, int)
+    -> decltype(V(value, duckdb::count_t(count))) {
+	return V(value, duckdb::count_t(count));
+}
+#endif
+template <class V>
+V MakeValueVector(const duckdb::Value &value, duckdb::idx_t, long) {
+	return V(value);
+}
+} // namespace detail
+
+//! Make `vector` a constant vector holding `value` for `count` rows
+//! (Vector::Reference(Value)).
+inline void ReferenceValue(duckdb::Vector &vector, const duckdb::Value &value, duckdb::idx_t count) {
+	detail::ReferenceValue(vector, value, count, 0);
+}
+
+//! A constant vector holding `value` for `count` rows (Vector(Value)).
+inline duckdb::Vector MakeValueVector(const duckdb::Value &value, duckdb::idx_t count) {
+	return detail::MakeValueVector<duckdb::Vector>(value, count, 0);
+}
+
+// --- Writing flat vector data ---------------------------------------------------------
+// 2.0: FlatVector::GetData<T> returns const T*; writes go through GetDataMutable.
+namespace detail {
+template <class T, class FV = duckdb::FlatVector>
+auto FlatData(duckdb::Vector &vector, int) -> decltype(FV::template GetDataMutable<T>(vector)) {
+	return FV::template GetDataMutable<T>(vector);
+}
+template <class T, class FV = duckdb::FlatVector>
+T *FlatData(duckdb::Vector &vector, long) {
+	return FV::template GetData<T>(vector);
+}
+} // namespace detail
+
+//! The writable data of a flat vector (FlatVector::GetData / GetDataMutable).
+template <class T>
+T *FlatData(duckdb::Vector &vector) {
+	return detail::FlatData<T>(vector, 0);
+}
+
+// --- Bound expressions -------------------------------------------------------------------
+// 2.0 made the fields of bound expressions private: BoundReferenceExpression::
+// index -> Index() / IndexMutable(), BoundConjunctionExpression::children ->
+// GetChildren() / GetChildrenMutable().
+namespace detail {
+template <class E>
+auto ReferenceIndex(const E &expr, int) -> decltype(duckdb::idx_t(expr.Index())) {
+	return expr.Index();
+}
+template <class E>
+duckdb::idx_t ReferenceIndex(const E &expr, long) {
+	return expr.index;
+}
+
+template <class E>
+auto Children(E &expr, int) -> decltype(expr.GetChildrenMutable()) {
+	return expr.GetChildrenMutable();
+}
+template <class E>
+auto Children(const E &expr, int) -> decltype(expr.GetChildren()) {
+	return expr.GetChildren();
+}
+template <class E>
+auto Children(E &expr, long) -> decltype((expr.children)) {
+	return expr.children;
+}
+
+template <class E>
+auto ConstantValue(const E &expr, int) -> decltype(expr.GetValue()) {
+	return expr.GetValue();
+}
+template <class E>
+auto ConstantValue(const E &expr, long) -> decltype((expr.value)) {
+	return expr.value;
+}
+} // namespace detail
+
+//! The value of a BoundConstantExpression.
+inline const duckdb::Value &ConstantValue(const duckdb::BoundConstantExpression &expr) {
+	return detail::ConstantValue(expr, 0);
+}
+
+//! The chunk column a BoundReferenceExpression reads.
+inline duckdb::idx_t ReferenceIndex(const duckdb::BoundReferenceExpression &expr) {
+	return detail::ReferenceIndex(expr, 0);
+}
+
+//! The children of a bound expression that has a child list, e.g.
+//! BoundConjunctionExpression (mutable unless the expression is const).
+template <class E>
+auto Children(E &expr) -> decltype(detail::Children(expr, 0)) {
+	return detail::Children(expr, 0);
+}
+
+// --- Parsing SQL --------------------------------------------------------------------------
+// 2.0: ParserOptions' default constructor is private; a Parser is made from a
+// ClientContext (its settings) or ParserOptions::Builtin(). Before 2.0: Parser().
+namespace detail {
+template <class P = duckdb::Parser>
+auto ParseStatements(duckdb::ClientContext &context, const std::string &sql, int)
+    -> decltype(P(context), duckdb::vector<duckdb::unique_ptr<duckdb::SQLStatement>>()) {
+	P parser(context);
+	parser.ParseQuery(sql);
+	return std::move(parser.statements);
+}
+template <class P = duckdb::Parser>
+duckdb::vector<duckdb::unique_ptr<duckdb::SQLStatement>> ParseStatements(duckdb::ClientContext &, const std::string &sql,
+                                                                         long) {
+	P parser;
+	parser.ParseQuery(sql);
+	return std::move(parser.statements);
+}
+} // namespace detail
+
+//! The statements of `sql`, parsed with the context's parser settings (2.0)
+//! or the default ones (before 2.0).
+inline duckdb::vector<duckdb::unique_ptr<duckdb::SQLStatement>> ParseStatements(duckdb::ClientContext &context,
+                                                                                const std::string &sql) {
+	return detail::ParseStatements(context, sql, 0);
+}
+
+// --- Vector sizes -------------------------------------------------------------------------
+// 2.0 vectors carry their own size: a vector filled through SetValue or its
+// raw data keeps its size (0 for a fresh one) until it is set, and consumers
+// read that size. Before 2.0 a vector has no size of its own.
+namespace detail {
+template <class V, class FV = duckdb::FlatVector>
+auto SetVectorSize(V &vector, duckdb::idx_t count, int) -> decltype(FV::SetSize(vector, count)) {
+	FV::SetSize(vector, count);
+}
+template <class V>
+void SetVectorSize(V &, duckdb::idx_t, long) {
+}
+} // namespace detail
+
+//! Declare `count` rows of a flat vector filled in place (no-op before 2.0).
+inline void SetVectorSize(duckdb::Vector &vector, duckdb::idx_t count) {
+	detail::SetVectorSize(vector, count, 0);
 }
 
 } // namespace duckdb_compat

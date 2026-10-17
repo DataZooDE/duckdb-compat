@@ -54,6 +54,9 @@ jobs:
         run: |
           g++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include test/probe.cpp
           g++ -std=c++17 -fsyntax-only -Wall -DIN= -DOUT= -DOPTIONAL= -Iinclude -Iduckdb/src/include test/probe.cpp
+      - name: Probe with clang++ (stricter two-phase lookup, as on macOS)
+        if: runner.os == 'Linux'
+        run: clang++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include test/probe.cpp
       - name: Probe httplib helpers (bundled httplib + OpenSSL)
         if: runner.os == 'Linux'
         run: g++ -std=c++17 -fsyntax-only -Iinclude -Iduckdb/src/include -Iduckdb/third_party/httplib test/probe_httplib.cpp

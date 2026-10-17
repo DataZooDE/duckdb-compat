@@ -38,7 +38,7 @@ submodules when it builds.
 | `dc::IsInterrupted(ctx)` | `ctx.interrupted` | `ctx.IsInterrupted()` |
 | `dc::TryGetSetting(opener, key, v)` | `FileOpener::TryGetCurrentSetting(opener, key, v)` | same, with `Identifier(key)` |
 | `dc::BindNames` | `vector<string>` | `vector<Identifier>`; fill it with `emplace_back` |
-| `dc::ExecuteUnaryNullable<IN, OUT>(in, out, n, f)` | `UnaryExecutor::ExecuteWithNulls` | `UnaryExecutor::Execute` returning `optional<OUT>` |
+| `dc::ExecuteUnaryNullable<INPUT_TYPE, RESULT_TYPE>(in, out, n, f)` | `UnaryExecutor::ExecuteWithNulls` | `UnaryExecutor::Execute` returning `optional<RESULT_TYPE>` |
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 
@@ -55,7 +55,10 @@ Rules for adding a helper:
 1. Call sites never use `#if` on DuckDB versions. Add a helper here instead.
 2. Add the helper to `test/probe.cpp`, and a fake-type case to
    `test/test_dispatch.cpp` if it is generic.
-3. Make every member lookup *dependent*: reach it through a template
+3. Never name anything `IN`, `OUT`, `OPTIONAL`, `min`, `max`, `ERROR` or
+   `DELETE`: `<windows.h>` defines them as macros. CI probes with MSVC and the
+   real `<windows.h>`.
+4. Make every member lookup *dependent*: reach it through a template
    parameter. A name looked up in a concrete class, or a type that only some
    versions have (`Identifier`), is resolved when the template is defined, and
    SFINAE cannot discard it. Guard such types with `__has_include`.

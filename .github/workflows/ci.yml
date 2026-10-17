@@ -24,12 +24,14 @@ jobs:
     # Every helper instantiated against the REAL headers of each DuckDB line we
     # ship for. Add a line here when DuckDB (or community-extensions'
     # DUCKDB_LATEST_STABLE) moves.
-    name: Probe (${{ matrix.line }})
-    runs-on: ubuntu-latest
+    name: Probe (${{ matrix.line }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, windows-latest]
+        line: [v1.4.5 LTS, v1.5.6, v2.0 (community-extensions default)]
         include:
           - line: v1.4.5 LTS
             ref: v1.4.5
@@ -45,4 +47,13 @@ jobs:
           ref: ${{ matrix.ref }}
           path: duckdb
           sparse-checkout: src/include
-      - run: g++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include test/probe.cpp
+      - name: Probe with g++ (Windows' IN/OUT/OPTIONAL macros simulated)
+        if: runner.os == 'Linux'
+        run: |
+          g++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include test/probe.cpp
+          g++ -std=c++17 -fsyntax-only -Wall -DIN= -DOUT= -DOPTIONAL= -Iinclude -Iduckdb/src/include test/probe.cpp
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+      - name: Probe with MSVC (real <windows.h>)
+        if: runner.os == 'Windows'
+        run: cl /nologo /std:c++17 /EHsc /Zs /permissive- /Iinclude /Iduckdb\src\include test\probe.cpp

@@ -7,7 +7,7 @@
 // broke every Windows build of a template parameter called IN. The Linux job
 // simulates the same macros with -DIN= -DOUT= -DOPTIONAL=.
 #ifdef _WIN32
-#define NOMINMAX // as DuckDB's own build defines; its headers need it
+#define NOMINMAX // as duckdb/common/windows.hpp does; DuckDB headers need it
 #include <windows.h>
 #endif
 #include "duckdb.hpp"

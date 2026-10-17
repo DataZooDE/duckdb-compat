@@ -36,6 +36,7 @@ void Probe(optional_ptr<FileOpener> opener, ClientContext &ctx, const BaseSecret
 	TableFunction tf("probe", {}, nullptr, ProbeBind);
 	ScalarFunction sf("probe", {LogicalType::VARCHAR}, LogicalType::BIGINT, ProbeScalar);
 	duckdb_compat::SetStability(sf, FunctionStability::VOLATILE);
+	duckdb_compat::SetFallible(sf);
 	(void)tf;
 }
 

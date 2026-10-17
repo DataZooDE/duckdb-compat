@@ -25,6 +25,14 @@ struct BothFn {
 	void SetStability(Stab v) { stability = v; used_setter = true; }
 };
 
+enum class Errs { CANNOT_ERROR, CAN_THROW_RUNTIME_ERROR };
+// 1.4: a public `errors` field; 1.5 and 2.0: SetFallible().
+struct OldErrFn { Errs errors = Errs::CANNOT_ERROR; };
+struct NewErrFn {
+	bool fallible = false;
+	void SetFallible() { fallible = true; }
+};
+
 struct OldCtx { std::atomic<bool> interrupted {true}; };
 struct NewCtx { bool IsInterrupted() const { return true; } };
 
@@ -50,6 +58,9 @@ int main() {
 	OldFn o; dc::SetStability(o, Stab::B); assert(o.stability == Stab::B);
 	NewFn n; dc::SetStability(n, Stab::B); assert(n.s == Stab::B && n.used_setter);
 	BothFn b; dc::SetStability(b, Stab::B); assert(b.used_setter);
+
+	OldErrFn oe; dc::SetFallible(oe); assert(oe.errors == Errs::CAN_THROW_RUNTIME_ERROR);
+	NewErrFn ne; dc::SetFallible(ne); assert(ne.fallible);
 
 	OldCtx oc; assert(dc::IsInterrupted(oc));
 	NewCtx nc; assert(dc::IsInterrupted(nc));

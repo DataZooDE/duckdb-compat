@@ -23,6 +23,18 @@ void SetStability(F &fn, S value, long) {
 	fn.stability = value;
 }
 
+// --- Scalar function "may throw": 2.0 turns an error thrown by a function
+// NOT marked fallible into an INTERNAL error. 1.5/2.0: SetFallible(); 1.4:
+// the public `errors` field (FunctionErrors::CAN_THROW_RUNTIME_ERROR).
+template <class F>
+auto SetFallible(F &fn, int) -> decltype(fn.SetFallible(), void()) {
+	fn.SetFallible();
+}
+template <class F>
+void SetFallible(F &fn, long) {
+	fn.errors = decltype(fn.errors)::CAN_THROW_RUNTIME_ERROR;
+}
+
 // --- ClientContext interrupt: 2.0 removed the public `interrupted` atomic --
 template <class C>
 auto IsInterrupted(const C &ctx, int) -> decltype(static_cast<bool>(ctx.IsInterrupted())) {
@@ -69,6 +81,14 @@ void *TlsContext(C &client, long) {
 template <class F, class S>
 void SetStability(F &fn, S value) {
 	detail::SetStability(fn, value, 0);
+}
+
+//! Mark a scalar function as one that may throw at runtime. REQUIRED on 2.0
+//! for any function that can raise an error (I/O, validation): otherwise the
+//! error surfaces as an INTERNAL error asking the author to call SetFallible().
+template <class F>
+void SetFallible(F &fn) {
+	detail::SetFallible(fn, 0);
 }
 
 //! ctx.IsInterrupted() where available, else ctx.interrupted.

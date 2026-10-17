@@ -34,6 +34,7 @@ submodules when it builds.
 |---|---|---|
 | `dc::Str(x)` | `x` (a `std::string`) | `x.GetIdentifierName()`: secret names and option keys are `Identifier` |
 | `dc::SetStability(fn, s)` | `fn.stability = s` (1.5 also has the setter) | `fn.SetStability(s)` |
+| `dc::SetFallible(fn)` | `fn.errors = CAN_THROW_RUNTIME_ERROR` (1.4), `fn.SetFallible()` (1.5) | `fn.SetFallible()`. **Required** for any scalar function that can throw: 2.0 turns its error into an INTERNAL error |
 | `dc::IsInterrupted(ctx)` | `ctx.interrupted` | `ctx.IsInterrupted()` |
 | `dc::TryGetSetting(opener, key, v)` | `FileOpener::TryGetCurrentSetting(opener, key, v)` | same, with `Identifier(key)` |
 | `dc::BindNames` | `vector<string>` | `vector<Identifier>`; fill it with `emplace_back` |

@@ -71,25 +71,25 @@ inline duckdb::SettingLookupResult TryGetSetting(duckdb::optional_ptr<duckdb::Fi
 // Before 2.0: UnaryExecutor::ExecuteWithNulls with a (input, mask, idx) lambda.
 // 2.0: UnaryExecutor::Execute with a lambda returning optional<RESULT>.
 namespace detail {
-template <class IN, class OUT, class F>
+template <class INPUT_TYPE, class RESULT_TYPE, class F>
 struct WithNullsAdapter {
 	F &fun;
-	OUT operator()(IN input, duckdb::ValidityMask &mask, duckdb::idx_t idx) const {
+	RESULT_TYPE operator()(INPUT_TYPE input, duckdb::ValidityMask &mask, duckdb::idx_t idx) const {
 		bool is_null = false;
-		OUT out = fun(input, is_null);
+		RESULT_TYPE out = fun(input, is_null);
 		if (is_null) {
 			mask.SetInvalid(idx);
-			return OUT();
+			return RESULT_TYPE();
 		}
 		return out;
 	}
 };
-template <class IN, class OUT, class F>
+template <class INPUT_TYPE, class RESULT_TYPE, class F>
 struct OptionalAdapter {
 	F &fun;
-	std::optional<OUT> operator()(IN input) const {
+	std::optional<RESULT_TYPE> operator()(INPUT_TYPE input) const {
 		bool is_null = false;
-		OUT out = fun(input, is_null);
+		RESULT_TYPE out = fun(input, is_null);
 		if (is_null) {
 			return std::nullopt;
 		}
@@ -101,24 +101,24 @@ struct OptionalAdapter {
 // name looked up in a concrete class (duckdb::UnaryExecutor::ExecuteWithNulls)
 // is resolved when the template is defined, so its absence on 2.0 would be a
 // hard error rather than a discarded overload.
-template <class IN, class OUT, class F, class EXEC = duckdb::UnaryExecutor>
+template <class INPUT_TYPE, class RESULT_TYPE, class F, class EXEC = duckdb::UnaryExecutor>
 auto ExecuteUnaryNullable(duckdb::Vector &input, duckdb::Vector &result, duckdb::idx_t count, F &fun, int)
-    -> decltype(EXEC::template ExecuteWithNulls<IN, OUT>(input, result, count,
-                                                         std::declval<WithNullsAdapter<IN, OUT, F>>()),
+    -> decltype(EXEC::template ExecuteWithNulls<INPUT_TYPE, RESULT_TYPE>(input, result, count,
+                                                         std::declval<WithNullsAdapter<INPUT_TYPE, RESULT_TYPE, F>>()),
                 void()) {
-	EXEC::template ExecuteWithNulls<IN, OUT>(input, result, count, WithNullsAdapter<IN, OUT, F> {fun});
+	EXEC::template ExecuteWithNulls<INPUT_TYPE, RESULT_TYPE>(input, result, count, WithNullsAdapter<INPUT_TYPE, RESULT_TYPE, F> {fun});
 }
-template <class IN, class OUT, class F, class EXEC = duckdb::UnaryExecutor>
+template <class INPUT_TYPE, class RESULT_TYPE, class F, class EXEC = duckdb::UnaryExecutor>
 void ExecuteUnaryNullable(duckdb::Vector &input, duckdb::Vector &result, duckdb::idx_t count, F &fun, long) {
-	EXEC::template Execute<IN, OUT>(input, result, count, OptionalAdapter<IN, OUT, F> {fun});
+	EXEC::template Execute<INPUT_TYPE, RESULT_TYPE>(input, result, count, OptionalAdapter<INPUT_TYPE, RESULT_TYPE, F> {fun});
 }
 } // namespace detail
 
-//! Run `fun(IN input, bool &is_null) -> OUT` over a vector; setting is_null
+//! Run `fun(INPUT_TYPE input, bool &is_null) -> RESULT_TYPE` over a vector; setting is_null
 //! makes that row NULL. Replaces UnaryExecutor::ExecuteWithNulls.
-template <class IN, class OUT, class F>
+template <class INPUT_TYPE, class RESULT_TYPE, class F>
 void ExecuteUnaryNullable(duckdb::Vector &input, duckdb::Vector &result, duckdb::idx_t count, F fun) {
-	detail::ExecuteUnaryNullable<IN, OUT>(input, result, count, fun, 0);
+	detail::ExecuteUnaryNullable<INPUT_TYPE, RESULT_TYPE>(input, result, count, fun, 0);
 }
 
 } // namespace duckdb_compat

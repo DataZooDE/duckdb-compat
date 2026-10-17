@@ -1,6 +1,15 @@
 // Compile probe: every DuckDB-facing helper, instantiated against the REAL
 // DuckDB headers. CI compiles this (-fsyntax-only) against each supported
 // DuckDB line; a helper that breaks on one line fails that line's job.
+//
+// <windows.h> comes first, as it does in any extension that talks to the OS:
+// it defines IN, OUT and OPTIONAL as empty macros (minwindef.h), which once
+// broke every Windows build of a template parameter called IN. The Linux job
+// simulates the same macros with -DIN= -DOUT= -DOPTIONAL=.
+#ifdef _WIN32
+#define NOMINMAX // as duckdb/common/windows.hpp does; DuckDB headers need it
+#include <windows.h>
+#endif
 #include "duckdb.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/vector_operations/unary_executor.hpp"

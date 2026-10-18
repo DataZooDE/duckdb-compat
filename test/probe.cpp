@@ -57,6 +57,10 @@ static void ProbeBindInput(TableFunctionBindInput &input) {
 	(void)framing;
 }
 
+void ProbeChunk(DataChunk &chunk) {
+	duckdb_compat::SetChildCardinality(chunk, 0);
+}
+
 void ProbeQuery(ClientContext &ctx) {
 	Connection con(*ctx.db);
 	auto res = con.Query("SELECT 1 AS a");

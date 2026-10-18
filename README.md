@@ -52,6 +52,16 @@ submodules when it builds.
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 | `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |
+| `dc::Ident(s)`, `dc::Str(x)`, `dc::Strs(names)`, `dc::Idents(names)` | `std::string` (1.4); 1.5.6 has an `Identifier` that converts implicitly | catalog names are `Identifier`, explicit from and to `std::string`. `Ident` into catalog APIs (`GetCatalogEntry`, `GetSchema`, `ColumnList::GetColumn`, `ColumnDefinition`, ...), `Str` out of them. 2.0 formats an `Identifier` exception argument with quotes: pass `Str(...)` |
+| `dc::SetQualifiedName(info, catalog, schema, name)`, `dc::SetSchema(info, s)`, `dc::SetCatalog(info, c)` | `info.catalog`/`info.schema`/`info.table` (1.4); 1.5.6 also has the 2.0 setters | one private `QualifiedName` behind `SetQualifiedName` / `SetSchema` / `SetCatalog`. Works for `CreateTableInfo`, `CreateViewInfo`, `CreateSequenceInfo`, `CreateSchemaInfo` and `DropInfo` |
+| `dc::MakeUniqueConstraint({"a", "b"}, is_pk)` | `UniqueConstraint(vector<string>, bool)` | `UniqueConstraint(vector<Identifier>, bool)` |
+| `dc::EntryName(name)` | the string itself: **`EntryLookupInfo` keeps a reference to it**, so never pass a temporary | `QualifiedName(Identifier(name))` by value |
+| `dc::GetEntry<T>(catalog, ctx, schema, name, if_not_found)`, `dc::GetEntryInSchema(catalog, ctx, schema, lookup, if_not_found)` | `catalog.GetEntry(...)` | the same instance lookups, deprecated on 2.0 (whose replacement is static and resolves the catalog by name); the deprecation is silenced in one place |
+| `dc::ParseStatements(ctx, sql)` | `Parser().ParseQuery(sql)` | `Parser(ctx)`: `ParserOptions()` is private |
+| `dc::ReferenceValue(vec, value, n)`, `dc::MakeValueVector(value, n)` | `vec.Reference(value)`, `Vector(value)` | vectors carry their size: `Reference(value, count_t(n))`, `Vector(value, count_t(n))` |
+| `dc::SetVectorSize(vec, n)` | no-op | `FlatVector::SetSize`: a vector filled with `SetValue` or through its data keeps size 0 otherwise. For chunks use `chunk.SetChildCardinality(n)` (1.5.6 has it too) |
+| `dc::FlatData<T>(vec)` | `FlatVector::GetData<T>` | `FlatVector::GetDataMutable<T>` (`GetData` is const) |
+| `dc::ReferenceIndex(ref)`, `dc::Children(expr)`, `dc::ConstantValue(constant)` | public `index` / `children` / `value` | `Index()`, `GetChildren[Mutable]()`, `GetValue()` |
 
 **macOS on 2.0:** the bundled httplib reads the keychain whenever it is built
 with OpenSSL, so an extension that uses `duckdb_httplib_openssl` must link

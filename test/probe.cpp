@@ -17,6 +17,12 @@
 #include "duckdb/main/secret/secret.hpp"
 #include "duckdb/main/connection.hpp"
 #include "duckdb/function/copy_function.hpp"
+#include "duckdb/catalog/catalog_entry/table_catalog_entry.hpp"
+#include "duckdb/parser/parsed_data/create_schema_info.hpp"
+#include "duckdb/parser/parsed_data/create_sequence_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_view_info.hpp"
+#include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb_compat.hpp"
 
 namespace duckdb {
@@ -94,6 +100,72 @@ void Probe(optional_ptr<FileOpener> opener, ClientContext &ctx, const BaseSecret
 	duckdb_compat::SetStability(sf, FunctionStability::VOLATILE);
 	duckdb_compat::SetFallible(sf);
 	(void)tf;
+}
+
+void ProbeCatalogNames(ClientContext &ctx, Catalog &catalog, const ColumnList &columns) {
+	const std::string schema = "main", table = "runtime_table";
+	// runtime strings into catalog APIs, Identifiers back into strings
+	optional_ptr<Catalog> attached = Catalog::GetCatalogEntry(ctx, duckdb_compat::Ident("memory"));
+	(void)attached;
+	optional_ptr<SchemaCatalogEntry> schema_entry =
+	    catalog.GetSchema(ctx, duckdb_compat::Ident(schema), OnEntryNotFound::RETURN_NULL);
+	(void)schema_entry;
+	std::string catalog_name = duckdb_compat::Str(catalog.GetName());
+	(void)catalog_name;
+	bool exists = columns.ColumnExists(duckdb_compat::Ident("a"));
+	(void)exists;
+	ColumnDefinition column(duckdb_compat::Ident(table), LogicalType::BIGINT);
+	std::vector<std::string> names = duckdb_compat::Strs(columns.GetColumnNames());
+	(void)names;
+
+	// CreateInfo / DropInfo qualification
+	CreateTableInfo table_info;
+	duckdb_compat::SetQualifiedName(table_info, "memory", schema, table);
+	table_info.constraints.push_back(duckdb_compat::MakeUniqueConstraint({"a", "b"}, true));
+	CreateSequenceInfo sequence_info;
+	duckdb_compat::SetQualifiedName(sequence_info, "memory", schema, "seq");
+	CreateViewInfo view_info;
+	duckdb_compat::SetCatalog(view_info, "memory");
+	duckdb_compat::SetSchema(view_info, schema);
+	CreateSchemaInfo schema_info;
+	duckdb_compat::SetCatalog(schema_info, "memory");
+	duckdb_compat::SetSchema(schema_info, schema);
+	DropInfo drop;
+	duckdb_compat::SetQualifiedName(drop, "memory", schema, table);
+	duckdb_compat::SetSchema(drop, schema);
+	duckdb_compat::SetCatalog(drop, "memory");
+
+	// lookups
+	optional_ptr<TableCatalogEntry> entry = duckdb_compat::GetEntry<TableCatalogEntry>(catalog, ctx, schema, table);
+	(void)entry;
+	EntryLookupInfo lookup(CatalogType::TABLE_ENTRY, duckdb_compat::EntryName(table));
+	optional_ptr<CatalogEntry> found =
+	    duckdb_compat::GetEntryInSchema(catalog, ctx, schema, lookup, OnEntryNotFound::RETURN_NULL);
+	(void)found;
+
+	auto statements = duckdb_compat::ParseStatements(ctx, "SELECT 42");
+	(void)statements;
+}
+
+void ProbeVectorsAndExpressions(BoundReferenceExpression &ref, BoundConjunctionExpression &conjunction,
+                                const BoundConjunctionExpression &const_conjunction,
+                                const BoundConstantExpression &constant) {
+	Vector vec(LogicalType::BIGINT);
+	duckdb_compat::ReferenceValue(vec, Value::BIGINT(1), 10);
+	Vector constant_vector = duckdb_compat::MakeValueVector(Value::BIGINT(1), 1);
+	(void)constant_vector;
+	Vector flat(LogicalType::BIGINT);
+	int64_t *data = duckdb_compat::FlatData<int64_t>(flat);
+	data[0] = 1;
+	duckdb_compat::SetVectorSize(flat, 1);
+
+	idx_t column = duckdb_compat::ReferenceIndex(ref);
+	(void)column;
+	duckdb_compat::Children(conjunction).push_back(nullptr);
+	idx_t child_count = duckdb_compat::Children(const_conjunction).size();
+	(void)child_count;
+	const Value &value = duckdb_compat::ConstantValue(constant);
+	(void)value;
 }
 
 } // namespace duckdb

@@ -35,6 +35,24 @@ void SetFallible(F &fn, long) {
 	fn.errors = decltype(fn.errors)::CAN_THROW_RUNTIME_ERROR;
 }
 
+// --- DataChunk cardinality: on 2.0 vectors carry their own size, and
+// DataChunk::SetCardinality (deprecated) sets only the chunk's count. A scan that
+// fills rows with SetValue and then calls SetCardinality leaves its vectors at
+// size 0, and operators that read Vector::size() -- IS NULL among them -- return
+// garbage. SetChildCardinality also sizes the vectors. 1.5.6 backports it as an
+// alias of SetCardinality; 1.4 has only SetCardinality.
+template <class CHUNK, class COUNT>
+auto SetChildCardinality(CHUNK &chunk, COUNT count, int) -> decltype(chunk.SetChildCardinality(count), void()) {
+	chunk.SetChildCardinality(count);
+}
+// Deliberately not SFINAE-constrained: naming SetCardinality in the signature
+// would raise 2.0's deprecation warning even where the overload above wins. The
+// body is only instantiated when this overload is chosen.
+template <class CHUNK, class COUNT>
+void SetChildCardinality(CHUNK &chunk, COUNT count, long) {
+	chunk.SetCardinality(count);
+}
+
 // --- ClientContext interrupt: 2.0 removed the public `interrupted` atomic --
 template <class C>
 auto IsInterrupted(const C &ctx, int) -> decltype(static_cast<bool>(ctx.IsInterrupted())) {
@@ -89,6 +107,14 @@ void SetStability(F &fn, S value) {
 template <class F>
 void SetFallible(F &fn) {
 	detail::SetFallible(fn, 0);
+}
+
+//! Set a DataChunk's row count AND its vectors' sizes. Use it wherever a table
+//! function or COPY writer ends a chunk with SetCardinality(n): on 2.0 that
+//! leaves the vectors unsized, and IS NULL over the output returns garbage.
+template <class CHUNK, class COUNT>
+void SetChildCardinality(CHUNK &chunk, COUNT count) {
+	detail::SetChildCardinality(chunk, count, 0);
 }
 
 //! ctx.IsInterrupted() where available, else ctx.interrupted.

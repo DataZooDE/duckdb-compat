@@ -54,6 +54,19 @@ struct NewClient {
 	void *tls_context() const { return const_cast<int *>(&ctx); }
 };
 
+// 1.4: only SetCardinality. 1.5.6: both (SetChildCardinality is a backport
+// alias). 2.0: both, but SetCardinality leaves the vectors' own size alone --
+// the helper must prefer SetChildCardinality whenever it exists.
+struct OldChunk {
+	unsigned long count = 0;
+	void SetCardinality(unsigned long n) { count = n; }
+};
+struct NewChunk {
+	unsigned long count = 0, child = 0;
+	void SetCardinality(unsigned long n) { count = n; }
+	void SetChildCardinality(unsigned long n) { count = n; child = n; }
+};
+
 int main() {
 	OldFn o; dc::SetStability(o, Stab::B); assert(o.stability == Stab::B);
 	NewFn n; dc::SetStability(n, Stab::B); assert(n.s == Stab::B && n.used_setter);
@@ -61,6 +74,9 @@ int main() {
 
 	OldErrFn oe; dc::SetFallible(oe); assert(oe.errors == Errs::CAN_THROW_RUNTIME_ERROR);
 	NewErrFn ne; dc::SetFallible(ne); assert(ne.fallible);
+
+	OldChunk och; dc::SetChildCardinality(och, 7); assert(och.count == 7);
+	NewChunk nch; dc::SetChildCardinality(nch, 7); assert(nch.count == 7 && nch.child == 7);
 
 	OldCtx oc; assert(dc::IsInterrupted(oc));
 	NewCtx nc; assert(dc::IsInterrupted(nc));

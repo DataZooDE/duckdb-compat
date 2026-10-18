@@ -49,6 +49,7 @@ submodules when it builds.
 | `dc::FetchRows(result)` | `Fetch()` loop | same; 2.0 has no `MaterializedQueryResult` and no `GetValue(col, row)`. Hold results as `unique_ptr<QueryResult>` |
 | `dc::TryCastValue(v, type, out, &err, strict)` | `DefaultTryCastAs(type, out, err, strict)` | `DefaultTryCastAs(type, err, strict)` returning `optional<Value>` |
 | `dc::ScalarMacroInfo(schema, name, "(a, b := 1) AS a + b")` | parses that `CREATE MACRO` | `DefaultMacro {schema, name, definition}` + `CreateInternalMacroInfo`. Table macros (`DefaultTableMacro`) are unchanged |
+| `dc::SetChildCardinality(chunk, n)` | `chunk.SetCardinality(n)` (1.5.6: `SetChildCardinality` is a backport alias) | `chunk.SetChildCardinality(n)`: vectors carry their own size; the deprecated `SetCardinality` leaves them at 0, and `IS NULL` over a scan's output then returns garbage |
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 | `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |

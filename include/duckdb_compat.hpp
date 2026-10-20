@@ -224,6 +224,7 @@ auto MakeTableBindInfo(duckdb::TableCatalogEntry &table, int) -> decltype(BIND_I
 }
 template <class BIND_INFO = duckdb::BindInfo>
 BIND_INFO MakeTableBindInfo(duckdb::TableCatalogEntry &, long) {
+	// Only MakeTableBindInfo calls this fallback with a real table entry.
 	return BIND_INFO(duckdb::ScanType::TABLE);
 }
 } // namespace detail
@@ -231,10 +232,11 @@ BIND_INFO MakeTableBindInfo(duckdb::TableCatalogEntry &, long) {
 using GetBindInfoInput = typename detail::OneArgFn<duckdb::table_function_get_bind_info_t>::argument;
 //! Extract bind data from a get_bind_info callback. On 2.0 the input wraps
 //! bind_data; on older lines it is the bind-data pointer itself.
-template <class INPUT>
-auto GetBindData(INPUT &input) -> decltype(detail::GetBindData<GetBindInfoInput>(input, 0)) {
+inline auto GetBindData(GetBindInfoInput &input) -> decltype(detail::GetBindData<GetBindInfoInput>(input, 0)) {
 	return detail::GetBindData<GetBindInfoInput>(input, 0);
 }
+//! On 2.0 BindInfo(table) is gone: the table is identified by get_table_entry,
+//! which must be registered alongside get_bind_info.
 inline duckdb::BindInfo MakeTableBindInfo(duckdb::TableCatalogEntry &table) {
 	return detail::MakeTableBindInfo(table, 0);
 }
@@ -251,9 +253,9 @@ void SetTableEntryGetter(FUNCTION &, CALLBACK, long) {
 }
 } // namespace detail
 
-template <class FUNCTION, class CALLBACK>
 //! Register this together with get_bind_info for catalog scans. DuckDB 2.0
 //! asks get_table_entry when binding DELETE/UPDATE; older lines use bind info.
+template <class FUNCTION, class CALLBACK>
 void SetTableEntryGetter(FUNCTION &function, CALLBACK callback) {
 	static_assert(std::is_same_v<std::decay_t<FUNCTION>, duckdb::TableFunction>,
 	              "Table entry getter requires a TableFunction");
@@ -406,6 +408,9 @@ void ForEachFunction(SET &set, F &&f) {
 
 template <class INFO>
 void NameFunctionsFromDescriptions(INFO &info) {
+	if (info.descriptions.empty()) {
+		return;
+	}
 	duckdb::idx_t count = 0;
 	std::string function_name;
 	ForEachFunction(info.functions, [&](auto &fn) {
@@ -420,10 +425,9 @@ void NameFunctionsFromDescriptions(INFO &info) {
 		                                std::to_string(info.descriptions.size()) + " descriptions)");
 	}
 	duckdb::idx_t index = 0;
+	// descriptions[i] names overload i in ForEachFunction/AddFunction order.
 	ForEachFunction(info.functions, [&](auto &fn) {
-		if (index < info.descriptions.size()) {
-			NameParameters(fn, info.descriptions[index].parameter_names);
-		}
+		NameParameters(fn, info.descriptions[index].parameter_names);
 		index++;
 	});
 }
@@ -759,7 +763,10 @@ GetEntryInSchema(duckdb::Catalog &catalog, duckdb::ClientContext &context, const
 namespace detail {
 struct RowCount {
 	duckdb::idx_t count;
-	template <class T, std::enable_if_t<!std::is_integral_v<T>, int> = 0>
+	template <class T,
+	          std::enable_if_t<std::is_class_v<T> && std::is_constructible_v<T, duckdb::idx_t> &&
+	                               !std::is_convertible_v<duckdb::idx_t, T>,
+	                           int> = 0>
 	operator T() const {
 		return T(count);
 	}

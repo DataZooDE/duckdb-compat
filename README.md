@@ -50,6 +50,7 @@ submodules when it builds.
 | `dc::TryCastValue(v, type, out, &err, strict)` | `DefaultTryCastAs(type, out, err, strict)` | `DefaultTryCastAs(type, err, strict)` returning `optional<Value>` |
 | `dc::ScalarMacroInfo(schema, name, "(a, b := 1) AS a + b")` | parses that `CREATE MACRO` | `DefaultMacro {schema, name, definition}` + `CreateInternalMacroInfo`. Table macros (`DefaultTableMacro`) are unchanged |
 | `dc::SetChildCardinality(chunk, n)` | `chunk.SetCardinality(n)` (1.5.6: `SetChildCardinality` is a backport alias) | `chunk.SetChildCardinality(n)`: vectors carry their own size; the deprecated `SetCardinality` leaves them at 0, and `IS NULL` over a scan's output then returns garbage |
+| `dc::ToUnifiedFormat(vector, n, format)` | `vector.ToUnifiedFormat(n, format)` | `vector.ToUnifiedFormat(format)`; 2.0 reads the vector's own size and deprecates the count-taking overload |
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 | `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |
@@ -66,17 +67,23 @@ submodules when it builds.
 | `dc::WithAlias(type, alias)`, `dc::ParsedConstant(value)` | legacy aliases and constant parser nodes | typed aliases and `ConstantExpression::FromValue` |
 | `dc::SetVarArgs(fn, type)` | `varargs` member | signature method |
 | `dc::GetBindData(input)`, `dc::GetBindInfoInput` | get-bind-info callback receives bind data directly | callback receives an input wrapper with `bind_data`; the fallback accepts only the callback input type |
-| `dc::MakeTableBindInfo(table)`, `dc::SetTableEntryGetter(fn, callback)` | `BindInfo(ScanType::TABLE)` and `get_bind_info` identify a table | `BindInfo(table)` and `get_table_entry` identify the table; register both callbacks together |
-| `dc::NameFunctionsFromDescriptions(info)` | names every mutable overload from descriptions | names every signature overload; throws if overload and description counts differ |
+| `dc::MakeTableBindInfo(table)`, `dc::SetTableEntryGetter(fn, callback)` | `BindInfo(table)`; `get_table_entry` is a no-op | `BindInfo(ScanType::TABLE)` drops the table; `get_table_entry` identifies it, so register both callbacks together |
+| `dc::NameFunctionsFromDescriptions(info)` | names every mutable overload by position when descriptions are present | names every signature overload by position; an empty description list is allowed, but a nonempty count mismatch throws |
 | `dc::ResultValue(result, col, row)` | `result.GetValue` | `result.Collection().GetValue` |
+| `dc::ResultTypes(result)` | public `types` | `GetTypes()` |
+| `dc::MutableValidity(vector)` | `FlatVector::Validity` | `FlatVector::ValidityMutable` |
+| `dc::AssignBindNames(out, names)`, `dc::BindNamedParameters` | binds string names and named-parameter map | binds identifier names and the current named-parameter map type |
+| `dc::CopyOptions` | copy bind input option type | copy bind input option type, read from the current API shape |
+| `dc::HasInitGlobal(fn)` | reads a function object's `init_global` | reads the pointer's `init_global` |
+| `dc::DefaultSchemaName` | string return type of `GetDefaultSchema` | optional identifier return type of `GetDefaultSchema` |
 
 ### Table filters (`duckdb_compat/filter.hpp`)
 
 | Helper | 1.4 / 1.5 | 2.0 |
 |---|---|---|
-| `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, filter class aliases | current legacy enum and classes; Bloom is absent on 1.4 | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER` |
+| `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, `dc::NEW_TABLE_FILTERS`, filter class aliases | current legacy enum and classes; Bloom is absent on 1.4 | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER`; the shape flag selects the complete alias |
 | `dc::FilterCount`, `dc::ForEachFilter`, `dc::SetFilter` | public filter map | `TableFilterSet` iterators and setters; `ForEachFilter` rejects unsupported multi-column filters |
-| `dc::FilterToString` | `TableFilter::ToString` | `ExpressionFilter::ToString` for expression filters |
+| `dc::FilterToString` | `TableFilter::ToString` | `ExpressionFilter::ToString` for expression filters; deserialization-only legacy filters have a type label because those classes have no `ToString` |
 | `dc::MakeDynamicFilterData`, `dc::DynamicSnapshot` | nested legacy constant filter | direct comparison and constant state |
 | `dc::IsOptionalExpressionFilter`, `dc::SimpleExpressionTree` | no expression filter; returns false or empty | recognizes optional wrappers and simple comparisons/conjunctions; drops optional AND children but never OR children |
 

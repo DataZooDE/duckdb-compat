@@ -26,11 +26,14 @@
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb_compat.hpp"
 #include "duckdb_compat/filter.hpp"
+#include <type_traits>
 
 static_assert(!duckdb_compat::FilterKind::BLOOM_FILTER ||
                   static_cast<int>(*duckdb_compat::FilterKind::BLOOM_FILTER) == 10,
               "Bloom filter must retain its type value");
 using ProbeDefaultSchemaName = duckdb_compat::DefaultSchemaName;
+static_assert(!std::is_convertible_v<duckdb_compat::detail::RowCount, std::string>);
+static_assert(!std::is_convertible_v<duckdb_compat::detail::RowCount, void *>);
 static void ProbeMutableValidity(duckdb::Vector &v) {
 	duckdb_compat::MutableValidity(v).SetInvalid(0);
 }
@@ -87,6 +90,10 @@ static void ProbeBindInput(TableFunctionBindInput &input) {
 
 void ProbeChunk(DataChunk &chunk) {
 	duckdb_compat::SetChildCardinality(chunk, 0);
+}
+
+void ProbeUnifiedFormat(Vector &vector, UnifiedVectorFormat &format) {
+	duckdb_compat::ToUnifiedFormat(vector, 1, format);
 }
 
 void ProbeQuery(ClientContext &ctx) {

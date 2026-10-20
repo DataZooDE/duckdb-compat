@@ -96,6 +96,17 @@ struct NewChunk {
 	void SetChildCardinality(unsigned long n) { count = n; child = n; }
 };
 
+struct OldUnifiedVector {
+	void ToUnifiedFormat(unsigned long count, int &format) { format = static_cast<int>(count); }
+};
+struct NewUnifiedVector {
+	void ToUnifiedFormat(int &format) { format = 20; }
+};
+struct BothUnifiedVector {
+	void ToUnifiedFormat(unsigned long, int &format) { format = 10; }
+	void ToUnifiedFormat(int &format) { format = 20; }
+};
+
 struct OldBind {
 	int value = 3;
 };
@@ -103,14 +114,17 @@ struct NewBind {
 	OldBind *bind_data = nullptr;
 };
 struct UnrelatedBind {};
-template <class T, class = void>
+struct UnrelatedBindWithMember { int bind_data = 0; };
+template <class Expected, class T, class = void>
 struct CanGetBindData : std::false_type {};
-template <class T>
-struct CanGetBindData<T, std::void_t<decltype(dc::detail::GetBindData<OldBind>(std::declval<T &>(), 0))>>
+template <class Expected, class T>
+struct CanGetBindData<Expected, T, std::void_t<decltype(dc::detail::GetBindData<Expected>(std::declval<T &>(), 0))>>
     : std::true_type {};
-static_assert(CanGetBindData<OldBind>::value);
-static_assert(CanGetBindData<NewBind>::value);
-static_assert(!CanGetBindData<UnrelatedBind>::value);
+static_assert(CanGetBindData<OldBind, OldBind>::value);
+static_assert(CanGetBindData<NewBind, NewBind>::value);
+static_assert(!CanGetBindData<OldBind, NewBind>::value);
+static_assert(!CanGetBindData<NewBind, UnrelatedBind>::value);
+static_assert(!CanGetBindData<NewBind, UnrelatedBindWithMember>::value);
 
 struct OldResult {
 	int GetValue(int column, int row) {
@@ -232,6 +246,16 @@ int main() {
 	NewChunk nch;
 	dc::SetChildCardinality(nch, 7);
 	assert(nch.count == 7 && nch.child == 7);
+	int format = 0;
+	OldUnifiedVector old_vector;
+	dc::ToUnifiedFormat(old_vector, 7UL, format);
+	assert(format == 7);
+	NewUnifiedVector new_vector;
+	dc::ToUnifiedFormat(new_vector, 7UL, format);
+	assert(format == 20);
+	BothUnifiedVector both_vector;
+	dc::ToUnifiedFormat(both_vector, 7UL, format);
+	assert(format == 20);
 
 	OldCtx oc;
 	assert(dc::IsInterrupted(oc));
@@ -255,7 +279,7 @@ int main() {
 	OldBind old_bind;
 	NewBind new_bind {&old_bind};
 	assert(&dc::detail::GetBindData<OldBind>(old_bind, 0) == &old_bind);
-	assert(dc::detail::GetBindData<OldBind>(new_bind, 0) == &old_bind);
+	assert(dc::detail::GetBindData<NewBind>(new_bind, 0) == &old_bind);
 	OldResult old_result;
 	NewResult new_result;
 	BothResult both_result;

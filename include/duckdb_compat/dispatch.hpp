@@ -101,7 +101,9 @@ constexpr auto InKind(long) -> decltype(E::IN_FILTER) {
 // Bind-info callbacks receive bind data directly on 1.x and an input wrapper
 // on 2.0. Only the exact legacy callback argument may use the fallback.
 template <class EXPECTED, class INPUT>
-auto GetBindData(INPUT &input, int) -> decltype(input.bind_data) {
+auto GetBindData(INPUT &input, int)
+    -> std::enable_if_t<std::is_same_v<std::decay_t<INPUT>, std::decay_t<EXPECTED>>,
+                        decltype(input.bind_data)> {
 	return input.bind_data;
 }
 template <class EXPECTED, class INPUT>
@@ -156,6 +158,18 @@ auto SetChildCardinality(CHUNK &chunk, COUNT count, int) -> decltype(chunk.SetCh
 template <class CHUNK, class COUNT>
 void SetChildCardinality(CHUNK &chunk, COUNT count, long) {
 	chunk.SetCardinality(count);
+}
+
+// 2.0 sizes vectors independently, so ToUnifiedFormat reads their size rather
+// than a caller-provided count. The deprecated count overload remains on 2.0.
+template <class VECTOR, class FORMAT, class COUNT>
+auto ToUnifiedFormat(VECTOR &vector, COUNT, FORMAT &format, int) -> decltype(vector.ToUnifiedFormat(format), void()) {
+	//! 2.0 ignores the supplied count: the producer must size its vector.
+	vector.ToUnifiedFormat(format);
+}
+template <class VECTOR, class FORMAT, class COUNT>
+void ToUnifiedFormat(VECTOR &vector, COUNT count, FORMAT &format, long) {
+	vector.ToUnifiedFormat(count, format);
 }
 
 // --- ClientContext interrupt: 2.0 removed the public `interrupted` atomic --
@@ -220,6 +234,12 @@ void SetFallible(F &fn) {
 template <class CHUNK, class COUNT>
 void SetChildCardinality(CHUNK &chunk, COUNT count) {
 	detail::SetChildCardinality(chunk, count, 0);
+}
+
+//! Vector::ToUnifiedFormat(format) on 2.0; count-taking form on 1.x.
+template <class VECTOR, class COUNT, class FORMAT>
+void ToUnifiedFormat(VECTOR &vector, COUNT count, FORMAT &format) {
+	detail::ToUnifiedFormat(vector, count, format, 0);
 }
 
 //! ctx.IsInterrupted() where available, else ctx.interrupted.

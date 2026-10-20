@@ -8,11 +8,118 @@
 // that 1.4.5 LTS lacks, so a version check cannot express the truth.
 #pragma once
 
+#include <optional>
 #include <string>
+#include <type_traits>
 
 namespace duckdb_compat {
 namespace detail {
 
+// Legacy table-filter kind names appeared in DuckDB 2.0.
+template <class E, class = void>
+struct HasLegacyFilterKind : std::false_type {};
+template <class E>
+struct HasLegacyFilterKind<E, std::void_t<decltype(E::LEGACY_CONSTANT_COMPARISON)>> : std::true_type {};
+template <class E>
+constexpr auto BloomKind(int) -> decltype(E::LEGACY_BLOOM_FILTER, std::optional<E>()) {
+	return E::LEGACY_BLOOM_FILTER;
+}
+template <class E>
+constexpr auto BloomKind(long) -> decltype(E::BLOOM_FILTER, std::optional<E>()) {
+	return E::BLOOM_FILTER;
+}
+template <class E>
+constexpr std::optional<E> BloomKind(...) {
+	return std::nullopt;
+}
+
+template <class E>
+constexpr auto ConstantKind(int) -> decltype(E::LEGACY_CONSTANT_COMPARISON) {
+	return E::LEGACY_CONSTANT_COMPARISON;
+}
+template <class E>
+constexpr auto ConstantKind(long) -> decltype(E::CONSTANT_COMPARISON) {
+	return E::CONSTANT_COMPARISON;
+}
+template <class E>
+constexpr auto NullKind(int) -> decltype(E::LEGACY_IS_NULL) {
+	return E::LEGACY_IS_NULL;
+}
+template <class E>
+constexpr auto NullKind(long) -> decltype(E::IS_NULL) {
+	return E::IS_NULL;
+}
+template <class E>
+constexpr auto NotNullKind(int) -> decltype(E::LEGACY_IS_NOT_NULL) {
+	return E::LEGACY_IS_NOT_NULL;
+}
+template <class E>
+constexpr auto NotNullKind(long) -> decltype(E::IS_NOT_NULL) {
+	return E::IS_NOT_NULL;
+}
+template <class E>
+constexpr auto AndKind(int) -> decltype(E::LEGACY_CONJUNCTION_AND) {
+	return E::LEGACY_CONJUNCTION_AND;
+}
+template <class E>
+constexpr auto AndKind(long) -> decltype(E::CONJUNCTION_AND) {
+	return E::CONJUNCTION_AND;
+}
+template <class E>
+constexpr auto OrKind(int) -> decltype(E::LEGACY_CONJUNCTION_OR) {
+	return E::LEGACY_CONJUNCTION_OR;
+}
+template <class E>
+constexpr auto OrKind(long) -> decltype(E::CONJUNCTION_OR) {
+	return E::CONJUNCTION_OR;
+}
+template <class E>
+constexpr auto OptionalKind(int) -> decltype(E::LEGACY_OPTIONAL_FILTER) {
+	return E::LEGACY_OPTIONAL_FILTER;
+}
+template <class E>
+constexpr auto OptionalKind(long) -> decltype(E::OPTIONAL_FILTER) {
+	return E::OPTIONAL_FILTER;
+}
+template <class E>
+constexpr auto DynamicKind(int) -> decltype(E::LEGACY_DYNAMIC_FILTER) {
+	return E::LEGACY_DYNAMIC_FILTER;
+}
+template <class E>
+constexpr auto DynamicKind(long) -> decltype(E::DYNAMIC_FILTER) {
+	return E::DYNAMIC_FILTER;
+}
+template <class E>
+constexpr auto InKind(int) -> decltype(E::LEGACY_IN_FILTER) {
+	return E::LEGACY_IN_FILTER;
+}
+template <class E>
+constexpr auto InKind(long) -> decltype(E::IN_FILTER) {
+	return E::IN_FILTER;
+}
+
+// Bind-info callbacks receive bind data directly on 1.x and an input wrapper
+// on 2.0. Only the exact legacy callback argument may use the fallback.
+template <class EXPECTED, class INPUT>
+auto GetBindData(INPUT &input, int)
+    -> std::enable_if_t<std::is_same_v<std::decay_t<INPUT>, std::decay_t<EXPECTED>>,
+                        decltype(input.bind_data)> {
+	return input.bind_data;
+}
+template <class EXPECTED, class INPUT>
+auto GetBindData(INPUT &input, long)
+    -> std::enable_if_t<std::is_same_v<std::decay_t<INPUT>, std::decay_t<EXPECTED>>, INPUT &> {
+	return input;
+}
+
+template <class RESULT, class INDEX>
+auto ResultValue(RESULT &result, INDEX column, INDEX row, int) -> decltype(result.Collection().GetValue(column, row)) {
+	return result.Collection().GetValue(column, row);
+}
+template <class RESULT, class INDEX>
+auto ResultValue(RESULT &result, INDEX column, INDEX row, long) -> decltype(result.GetValue(column, row)) {
+	return result.GetValue(column, row);
+}
 // --- ScalarFunction stability: 2.0 field -> setter (1.5.6 has both) -------
 template <class F, class S>
 auto SetStability(F &fn, S value, int) -> decltype(fn.SetStability(value), void()) {
@@ -51,6 +158,18 @@ auto SetChildCardinality(CHUNK &chunk, COUNT count, int) -> decltype(chunk.SetCh
 template <class CHUNK, class COUNT>
 void SetChildCardinality(CHUNK &chunk, COUNT count, long) {
 	chunk.SetCardinality(count);
+}
+
+// 2.0 sizes vectors independently, so ToUnifiedFormat reads their size rather
+// than a caller-provided count. The deprecated count overload remains on 2.0.
+template <class VECTOR, class FORMAT, class COUNT>
+auto ToUnifiedFormat(VECTOR &vector, COUNT, FORMAT &format, int) -> decltype(vector.ToUnifiedFormat(format), void()) {
+	//! 2.0 ignores the supplied count: the producer must size its vector.
+	vector.ToUnifiedFormat(format);
+}
+template <class VECTOR, class FORMAT, class COUNT>
+void ToUnifiedFormat(VECTOR &vector, COUNT count, FORMAT &format, long) {
+	vector.ToUnifiedFormat(count, format);
 }
 
 // --- ClientContext interrupt: 2.0 removed the public `interrupted` atomic --
@@ -115,6 +234,12 @@ void SetFallible(F &fn) {
 template <class CHUNK, class COUNT>
 void SetChildCardinality(CHUNK &chunk, COUNT count) {
 	detail::SetChildCardinality(chunk, count, 0);
+}
+
+//! Vector::ToUnifiedFormat(format) on 2.0; count-taking form on 1.x.
+template <class VECTOR, class COUNT, class FORMAT>
+void ToUnifiedFormat(VECTOR &vector, COUNT count, FORMAT &format) {
+	detail::ToUnifiedFormat(vector, count, format, 0);
 }
 
 //! ctx.IsInterrupted() where available, else ctx.interrupted.

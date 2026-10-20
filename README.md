@@ -113,7 +113,7 @@ Rules for adding a helper:
 1. Call sites never use `#if` on DuckDB versions. Add a helper here instead.
 2. Add the helper to `test/probe.cpp`, and a fake-type case to
    `test/test_dispatch.cpp` if it is generic.
-3. Never name anything `IN`, `OUT`, `OPTIONAL`, `min`, `max`, `ERROR` or
+3. Never name anything `IN`, `OUT`, `OPTIONAL`, `CALLBACK`, `WINAPI`, `PASCAL`, `APIENTRY`, `FAR`, `NEAR`, `CONST`, `min`, `max`, `ERROR` or
    `DELETE`: `<windows.h>` defines them as macros. CI probes with MSVC and the
    real `<windows.h>`.
 4. Make every member lookup *dependent*: reach it through a template

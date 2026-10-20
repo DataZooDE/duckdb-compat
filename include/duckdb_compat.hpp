@@ -23,6 +23,7 @@
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
+#include "duckdb/parser/expression/constant_expression.hpp"
 #include "duckdb_compat/dispatch.hpp"
 
 #include <optional>
@@ -31,18 +32,60 @@
 #include <type_traits>
 #include <vector>
 
-#if __has_include("duckdb/common/identifier.hpp")
-#include "duckdb/common/identifier.hpp"
-#define DUCKDB_COMPAT_HAS_IDENTIFIER 1
-#endif
-
-// 2.0: vectors carry their own size; count_t is the explicit row-count type
-#if __has_include("duckdb/common/types/size.hpp")
-#include "duckdb/common/types/size.hpp"
-#define DUCKDB_COMPAT_HAS_COUNT_T 1
-#endif
-
 namespace duckdb_compat {
+
+// Function::name is string on 1.x and Identifier on 2.0. Reading its type
+// avoids finding an unrelated system DuckDB header on older source trees.
+using IdentifierType = std::decay_t<decltype(std::declval<duckdb::Function &>().name)>;
+
+//! Return type of Catalog::GetDefaultSchema (string on 1.x, optional<Identifier> on 2.0).
+using DefaultSchemaName = decltype(std::declval<const duckdb::Catalog &>().GetDefaultSchema());
+
+namespace detail {
+template <class FLAT = duckdb::FlatVector>
+auto MutableValidity(duckdb::Vector &vector, int) -> decltype(FLAT::ValidityMutable(vector)) {
+	return FLAT::ValidityMutable(vector);
+}
+template <class FLAT = duckdb::FlatVector>
+auto MutableValidity(duckdb::Vector &vector, long) -> decltype(FLAT::Validity(vector)) {
+	return FLAT::Validity(vector);
+}
+} // namespace detail
+
+inline duckdb::ValidityMask &MutableValidity(duckdb::Vector &vector) {
+	return detail::MutableValidity(vector, 0);
+}
+
+namespace detail {
+template <class TYPE>
+auto WithAlias(TYPE type, const std::string &alias, int) -> decltype(type.WithAlias(alias)) {
+	return type.WithAlias(alias);
+}
+template <class TYPE>
+TYPE WithAlias(TYPE type, const std::string &alias, long) {
+	type.SetAlias(alias);
+	return type;
+}
+} // namespace detail
+
+inline duckdb::LogicalType WithAlias(duckdb::LogicalType type, const std::string &alias) {
+	return detail::WithAlias(std::move(type), alias, 0);
+}
+
+namespace detail {
+template <class EXPR = duckdb::ConstantExpression>
+auto ParsedConstant(const duckdb::Value &value, int) -> decltype(EXPR::FromValue(value)) {
+	return EXPR::FromValue(value);
+}
+template <class EXPR = duckdb::ConstantExpression>
+duckdb::unique_ptr<duckdb::ParsedExpression> ParsedConstant(const duckdb::Value &value, long) {
+	return duckdb::make_uniq<EXPR>(value);
+}
+} // namespace detail
+
+inline duckdb::unique_ptr<duckdb::ParsedExpression> ParsedConstant(const duckdb::Value &value) {
+	return detail::ParsedConstant(value, 0);
+}
 
 // --- Table-function bind: the column-name list's element type --------------
 // vector<string> before 2.0, vector<Identifier> in 2.0. Read off the
@@ -59,8 +102,18 @@ struct BindFnTraits<R (*)(A...)> {
 //! The `names` parameter type of a table-function bind callback. Fill it with
 //! names.emplace_back(...): Identifier's construction from std::string is
 //! explicit, which emplace_back honours and push_back does not.
-using BindNames = typename std::remove_reference<
-    typename detail::BindFnTraits<duckdb::table_function_bind_t>::names_ref>::type;
+using BindNames =
+    typename std::remove_reference<typename detail::BindFnTraits<duckdb::table_function_bind_t>::names_ref>::type;
+using BindNamedParameters =
+    typename std::remove_reference<decltype(std::declval<duckdb::TableFunctionBindInput &>().named_parameters)>::type;
+
+inline void AssignBindNames(BindNames &out, const std::vector<std::string> &names) {
+	out.clear();
+	out.reserve(names.size());
+	for (const auto &name : names) {
+		out.emplace_back(name);
+	}
+}
 
 // --- FileOpener::TryGetCurrentSetting: key is a string before 2.0, an
 // Identifier in 2.0 (explicit from string). ----------------------------------
@@ -70,15 +123,11 @@ auto TryGetSetting(O opener, const std::string &key, duckdb::Value &value, int)
     -> decltype(duckdb::FileOpener::TryGetCurrentSetting(opener, key, value)) {
 	return duckdb::FileOpener::TryGetCurrentSetting(opener, key, value);
 }
-#ifdef DUCKDB_COMPAT_HAS_IDENTIFIER
-// Guarded: 1.4 has no Identifier type, and a non-dependent name inside a
-// template is looked up at definition, which SFINAE cannot rescue.
 template <class O>
 auto TryGetSetting(O opener, const std::string &key, duckdb::Value &value, long)
-    -> decltype(duckdb::FileOpener::TryGetCurrentSetting(opener, duckdb::Identifier(key), value)) {
-	return duckdb::FileOpener::TryGetCurrentSetting(opener, duckdb::Identifier(key), value);
+    -> decltype(duckdb::FileOpener::TryGetCurrentSetting(opener, IdentifierType(key), value)) {
+	return duckdb::FileOpener::TryGetCurrentSetting(opener, IdentifierType(key), value);
 }
-#endif
 } // namespace detail
 
 //! FileOpener::TryGetCurrentSetting(opener, key, value) on every line.
@@ -123,14 +172,16 @@ struct OptionalAdapter {
 // hard error rather than a discarded overload.
 template <class INPUT_TYPE, class RESULT_TYPE, class F, class EXEC = duckdb::UnaryExecutor>
 auto ExecuteUnaryNullable(duckdb::Vector &input, duckdb::Vector &result, duckdb::idx_t count, F &fun, int)
-    -> decltype(EXEC::template ExecuteWithNulls<INPUT_TYPE, RESULT_TYPE>(input, result, count,
-                                                         std::declval<WithNullsAdapter<INPUT_TYPE, RESULT_TYPE, F>>()),
-                void()) {
-	EXEC::template ExecuteWithNulls<INPUT_TYPE, RESULT_TYPE>(input, result, count, WithNullsAdapter<INPUT_TYPE, RESULT_TYPE, F> {fun});
+    -> decltype(EXEC::template ExecuteWithNulls<INPUT_TYPE, RESULT_TYPE>(
+                    input, result, count, std::declval<WithNullsAdapter<INPUT_TYPE, RESULT_TYPE, F>>()),
+	            void()) {
+	EXEC::template ExecuteWithNulls<INPUT_TYPE, RESULT_TYPE>(input, result, count,
+	                                                         WithNullsAdapter<INPUT_TYPE, RESULT_TYPE, F> {fun});
 }
 template <class INPUT_TYPE, class RESULT_TYPE, class F, class EXEC = duckdb::UnaryExecutor>
 void ExecuteUnaryNullable(duckdb::Vector &input, duckdb::Vector &result, duckdb::idx_t count, F &fun, long) {
-	EXEC::template Execute<INPUT_TYPE, RESULT_TYPE>(input, result, count, OptionalAdapter<INPUT_TYPE, RESULT_TYPE, F> {fun});
+	EXEC::template Execute<INPUT_TYPE, RESULT_TYPE>(input, result, count,
+	                                                OptionalAdapter<INPUT_TYPE, RESULT_TYPE, F> {fun});
 }
 } // namespace detail
 
@@ -155,8 +206,62 @@ struct CopyBindFnTraits<R (*)(A...)> {
 
 //! The element container of a COPY TO bind callback's `names`; declare the
 //! parameter as `const duckdb_compat::CopyBindNames &names`.
-using CopyBindNames = typename std::remove_cv<typename std::remove_reference<
-    typename detail::CopyBindFnTraits<duckdb::copy_to_bind_t>::names_ref>::type>::type;
+using CopyBindNames = typename std::remove_cv<
+    typename std::remove_reference<typename detail::CopyBindFnTraits<duckdb::copy_to_bind_t>::names_ref>::type>::type;
+using CopyOptions =
+    typename std::remove_reference<decltype(std::declval<duckdb::CopyFunctionBindInput &>().info.options)>::type;
+
+namespace detail {
+template <class>
+struct OneArgFn;
+template <class R, class A>
+struct OneArgFn<R (*)(A)> {
+	using argument = A;
+};
+template <class BIND_INFO = duckdb::BindInfo>
+auto MakeTableBindInfo(duckdb::TableCatalogEntry &table, int) -> decltype(BIND_INFO(table)) {
+	return BIND_INFO(table);
+}
+template <class BIND_INFO = duckdb::BindInfo>
+BIND_INFO MakeTableBindInfo(duckdb::TableCatalogEntry &, long) {
+	return BIND_INFO(duckdb::ScanType::TABLE);
+}
+} // namespace detail
+
+using GetBindInfoInput = typename detail::OneArgFn<duckdb::table_function_get_bind_info_t>::argument;
+//! Extract bind data from a get_bind_info callback. On 2.0 the input wraps
+//! bind_data; on older lines it is the bind-data pointer itself.
+template <class INPUT>
+auto GetBindData(INPUT &input) -> decltype(detail::GetBindData<GetBindInfoInput>(input, 0)) {
+	return detail::GetBindData<GetBindInfoInput>(input, 0);
+}
+inline duckdb::BindInfo MakeTableBindInfo(duckdb::TableCatalogEntry &table) {
+	return detail::MakeTableBindInfo(table, 0);
+}
+
+namespace detail {
+template <class FUNCTION, class CALLBACK>
+auto SetTableEntryGetter(FUNCTION &function, CALLBACK callback, int)
+    -> decltype(function.get_table_entry = callback, void()) {
+	function.get_table_entry = callback;
+}
+template <class FUNCTION, class CALLBACK>
+void SetTableEntryGetter(FUNCTION &, CALLBACK, long) {
+	// Older DuckDB releases use get_bind_info to identify the table entry.
+}
+} // namespace detail
+
+template <class FUNCTION, class CALLBACK>
+//! Register this together with get_bind_info for catalog scans. DuckDB 2.0
+//! asks get_table_entry when binding DELETE/UPDATE; older lines use bind info.
+void SetTableEntryGetter(FUNCTION &function, CALLBACK callback) {
+	static_assert(std::is_same_v<std::decay_t<FUNCTION>, duckdb::TableFunction>,
+	              "Table entry getter requires a TableFunction");
+	static_assert(std::is_invocable_r_v<duckdb::optional_ptr<duckdb::TableCatalogEntry>, CALLBACK,
+	                                    duckdb::optional_ptr<const duckdb::FunctionData>>,
+	              "Table entry getter must accept bind data and return a table entry");
+	detail::SetTableEntryGetter(function, callback, 0);
+}
 
 // --- Function names: std::string before 2.0, Identifier in 2.0 ---------------
 // Identifier's construction from std::string is explicit, so a runtime string
@@ -181,7 +286,9 @@ template <class FN>
 auto AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalType &type, int)
     -> decltype(fn.GetSignature().GetTypedKwargs(), void()) {
 	auto &signature = fn.GetSignature();
-	auto add = [&](auto &kwargs) { kwargs.Add(FunctionNameType(name), type); };
+	auto add = [&](auto &kwargs) {
+		kwargs.Add(FunctionNameType(name), type);
+	};
 	if (signature.GetTypedKwargs()) {
 		signature.ExtendTypedKwargs(add);
 	} else {
@@ -190,7 +297,7 @@ auto AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalTyp
 }
 template <class FN>
 void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalType &type, long) {
-	fn.named_parameters[name] = type;
+	fn.named_parameters[typename decltype(fn.named_parameters)::key_type(name)] = type;
 }
 } // namespace detail
 
@@ -200,6 +307,23 @@ void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalTyp
 template <class FN>
 void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalType &type) {
 	detail::AddNamedParameter(fn, name, type, 0);
+}
+
+namespace detail {
+template <class FN>
+auto SetVarArgs(FN &fn, const duckdb::LogicalType &type, int)
+    -> decltype(fn.GetSignature().AddArgs(FunctionNameType("args"), type), void()) {
+	fn.GetSignature().AddArgs(FunctionNameType("args"), type);
+}
+template <class FN>
+void SetVarArgs(FN &fn, const duckdb::LogicalType &type, long) {
+	fn.varargs = type;
+}
+} // namespace detail
+
+template <class FN>
+void SetVarArgs(FN &fn, const duckdb::LogicalType &type) {
+	detail::SetVarArgs(fn, type, 0);
 }
 
 //! The value passed for named parameter `name` at bind time, or nullptr when
@@ -249,6 +373,14 @@ void NameParameters(FN &fn, const std::vector<std::string> &names) {
 // Before 2.0: set.functions is vector<T>, mutable in place. 2.0: it holds
 // immutable shared_ptr<const T>, changed only through ApplyToFunctions().
 namespace detail {
+template <class FN>
+auto HasInitGlobal(const FN &fn, int) -> decltype(fn->init_global, bool()) {
+	return fn->init_global != nullptr;
+}
+template <class FN>
+auto HasInitGlobal(const FN &fn, long) -> decltype(fn.init_global, bool()) {
+	return fn.init_global != nullptr;
+}
 template <class SET, class F>
 auto ForEachFunction(SET &set, F &&f, int) -> decltype(set.ApplyToFunctions(f), void()) {
 	set.ApplyToFunctions(f);
@@ -261,10 +393,39 @@ void ForEachFunction(SET &set, F &&f, long) {
 }
 } // namespace detail
 
+template <class FN>
+bool HasInitGlobal(const FN &fn) {
+	return detail::HasInitGlobal(fn, 0);
+}
+
 //! Call f(T &fun) on every overload of a function set, so the change sticks.
 template <class SET, class F>
 void ForEachFunction(SET &set, F &&f) {
 	detail::ForEachFunction(set, std::forward<F>(f), 0);
+}
+
+template <class INFO>
+void NameFunctionsFromDescriptions(INFO &info) {
+	duckdb::idx_t count = 0;
+	std::string function_name;
+	ForEachFunction(info.functions, [&](auto &fn) {
+		if (count == 0) {
+			function_name = Str(fn.name);
+		}
+		count++;
+	});
+	if (count != info.descriptions.size()) {
+		throw duckdb::InternalException("Function descriptions do not match overload count for " + function_name +
+		                                " (" + std::to_string(count) + " overloads, " +
+		                                std::to_string(info.descriptions.size()) + " descriptions)");
+	}
+	duckdb::idx_t index = 0;
+	ForEachFunction(info.functions, [&](auto &fn) {
+		if (index < info.descriptions.size()) {
+			NameParameters(fn, info.descriptions[index].parameter_names);
+		}
+		index++;
+	});
 }
 
 // --- Query results --------------------------------------------------------------
@@ -272,6 +433,14 @@ void ForEachFunction(SET &set, F &&f) {
 // `names` and GetValue(col, row). 2.0 removed MaterializedQueryResult; names
 // are private (GetNames(), Identifier). Fetch() exists on every line.
 namespace detail {
+template <class RESULT>
+auto ResultTypes(const RESULT &result, int) -> decltype(result.GetTypes()) {
+	return result.GetTypes();
+}
+template <class RESULT>
+auto ResultTypes(const RESULT &result, long) -> decltype((result.types)) {
+	return result.types;
+}
 template <class R>
 auto ResultNames(const R &result, int) -> decltype(result.GetNames(), std::vector<std::string>()) {
 	std::vector<std::string> out;
@@ -285,6 +454,16 @@ std::vector<std::string> ResultNames(const R &result, long) {
 	return std::vector<std::string>(result.names.begin(), result.names.end());
 }
 } // namespace detail
+
+template <class RESULT>
+const duckdb::vector<duckdb::LogicalType> &ResultTypes(const RESULT &result) {
+	return detail::ResultTypes(result, 0);
+}
+
+template <class RESULT>
+duckdb::Value ResultValue(RESULT &result, duckdb::idx_t column, duckdb::idx_t row) {
+	return detail::ResultValue(result, column, row, 0);
+}
 
 //! The result's column names as strings.
 inline std::vector<std::string> ResultNames(const duckdb::QueryResult &result) {
@@ -382,11 +561,6 @@ inline duckdb::unique_ptr<duckdb::CreateMacroInfo> ScalarMacroInfo(const char *s
 // Identifier type that converts implicitly to and from std::string (a backport
 // so that 2.0 spellings compile). On 2.0 both conversions are explicit, and
 // catalog APIs take and return Identifier.
-#ifdef DUCKDB_COMPAT_HAS_IDENTIFIER
-using IdentifierType = duckdb::Identifier;
-#else
-using IdentifierType = std::string;
-#endif
 
 //! A runtime string as the identifier type catalog APIs take: pass the result
 //! wherever 2.0 wants an Identifier (Catalog::GetCatalogEntry, GetSchema,
@@ -434,7 +608,7 @@ duckdb::unique_ptr<UC> MakeUniqueConstraint(std::vector<std::string> &columns, b
 
 //! A UNIQUE (or PRIMARY KEY) constraint over the named columns.
 inline duckdb::unique_ptr<duckdb::UniqueConstraint> MakeUniqueConstraint(std::vector<std::string> columns,
-                                                                        bool is_primary_key) {
+                                                                         bool is_primary_key) {
 	return detail::MakeUniqueConstraint<duckdb::UniqueConstraint>(columns, is_primary_key, 0);
 }
 
@@ -520,9 +694,8 @@ void SetCatalog(INFO &info, const std::string &catalog) {
 // already has the static Catalog::GetEntry<T>(context, QualifiedName, ...).
 
 //! True when EntryLookupInfo takes a QualifiedName (2.0)
-using EntryLookupTakesQualifiedName =
-    std::integral_constant<bool, std::is_constructible<duckdb::EntryLookupInfo, duckdb::CatalogType,
-                                                       const duckdb::QualifiedName &>::value>;
+using EntryLookupTakesQualifiedName = std::integral_constant<
+    bool, std::is_constructible<duckdb::EntryLookupInfo, duckdb::CatalogType, const duckdb::QualifiedName &>::value>;
 
 namespace detail {
 template <class QN = duckdb::QualifiedName>
@@ -538,8 +711,7 @@ inline const std::string &EntryName(const std::string &name, std::false_type) {
 //! QualifiedName by value on 2.0; before 2.0 `name` itself -- EntryLookupInfo
 //! keeps a *reference* to its name there, so `name` must outlive the lookup
 //! (never pass a temporary).
-inline auto EntryName(const std::string &name)
-    -> decltype(detail::EntryName(name, EntryLookupTakesQualifiedName())) {
+inline auto EntryName(const std::string &name) -> decltype(detail::EntryName(name, EntryLookupTakesQualifiedName())) {
 	return detail::EntryName(name, EntryLookupTakesQualifiedName());
 }
 
@@ -549,12 +721,12 @@ inline auto EntryName(const std::string &name)
 // catalog by name instead. These wrappers keep the instance semantics on every
 // line with the deprecation silenced in one place.
 #if defined(__GNUC__) || defined(__clang__)
-#define DUCKDB_COMPAT_PUSH_NO_DEPRECATED                                                                             \
+#define DUCKDB_COMPAT_PUSH_NO_DEPRECATED                                                                               \
 	_Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
 #define DUCKDB_COMPAT_POP_NO_DEPRECATED _Pragma("GCC diagnostic pop")
 #elif defined(_MSC_VER)
 #define DUCKDB_COMPAT_PUSH_NO_DEPRECATED __pragma(warning(push)) __pragma(warning(disable : 4996))
-#define DUCKDB_COMPAT_POP_NO_DEPRECATED __pragma(warning(pop))
+#define DUCKDB_COMPAT_POP_NO_DEPRECATED  __pragma(warning(pop))
 #else
 #define DUCKDB_COMPAT_PUSH_NO_DEPRECATED
 #define DUCKDB_COMPAT_POP_NO_DEPRECATED
@@ -573,11 +745,9 @@ duckdb::optional_ptr<T> GetEntry(duckdb::Catalog &catalog, duckdb::ClientContext
 
 //! catalog.GetEntry(context, schema, lookup, if_not_found): `lookup` (type,
 //! name, AT clause) within one schema of this catalog.
-inline duckdb::optional_ptr<duckdb::CatalogEntry> GetEntryInSchema(duckdb::Catalog &catalog,
-                                                                   duckdb::ClientContext &context,
-                                                                   const std::string &schema,
-                                                                   const duckdb::EntryLookupInfo &lookup,
-                                                                   duckdb::OnEntryNotFound if_not_found) {
+inline duckdb::optional_ptr<duckdb::CatalogEntry>
+GetEntryInSchema(duckdb::Catalog &catalog, duckdb::ClientContext &context, const std::string &schema,
+                 const duckdb::EntryLookupInfo &lookup, duckdb::OnEntryNotFound if_not_found) {
 	DUCKDB_COMPAT_PUSH_NO_DEPRECATED
 	return catalog.GetEntry(context, Ident(schema), lookup, if_not_found);
 	DUCKDB_COMPAT_POP_NO_DEPRECATED
@@ -587,25 +757,27 @@ inline duckdb::optional_ptr<duckdb::CatalogEntry> GetEntryInSchema(duckdb::Catal
 // 2.0 vectors carry their own size: Vector(Value) and Vector::Reference(Value)
 // take the row count (count_t, explicit from idx_t).
 namespace detail {
-#ifdef DUCKDB_COMPAT_HAS_COUNT_T
+struct RowCount {
+	duckdb::idx_t count;
+	template <class T, std::enable_if_t<!std::is_integral_v<T>, int> = 0>
+	operator T() const {
+		return T(count);
+	}
+};
 template <class V>
 auto ReferenceValue(V &vector, const duckdb::Value &value, duckdb::idx_t count, int)
-    -> decltype(vector.Reference(value, duckdb::count_t(count)), void()) {
-	vector.Reference(value, duckdb::count_t(count));
+    -> decltype(vector.Reference(value, RowCount {count}), void()) {
+	vector.Reference(value, RowCount {count});
 }
-#endif
 template <class V>
 void ReferenceValue(V &vector, const duckdb::Value &value, duckdb::idx_t, long) {
 	vector.Reference(value);
 }
 
-#ifdef DUCKDB_COMPAT_HAS_COUNT_T
 template <class V>
-auto MakeValueVector(const duckdb::Value &value, duckdb::idx_t count, int)
-    -> decltype(V(value, duckdb::count_t(count))) {
-	return V(value, duckdb::count_t(count));
+auto MakeValueVector(const duckdb::Value &value, duckdb::idx_t count, int) -> decltype(V(value, RowCount {count})) {
+	return V(value, RowCount {count});
 }
-#endif
 template <class V>
 V MakeValueVector(const duckdb::Value &value, duckdb::idx_t, long) {
 	return V(value);
@@ -708,8 +880,8 @@ auto ParseStatements(duckdb::ClientContext &context, const std::string &sql, int
 	return std::move(parser.statements);
 }
 template <class P = duckdb::Parser>
-duckdb::vector<duckdb::unique_ptr<duckdb::SQLStatement>> ParseStatements(duckdb::ClientContext &, const std::string &sql,
-                                                                         long) {
+duckdb::vector<duckdb::unique_ptr<duckdb::SQLStatement>> ParseStatements(duckdb::ClientContext &,
+                                                                         const std::string &sql, long) {
 	P parser;
 	parser.ParseQuery(sql);
 	return std::move(parser.statements);

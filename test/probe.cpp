@@ -21,9 +21,38 @@
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_sequence_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
 #include "duckdb_compat.hpp"
+#include "duckdb_compat/filter.hpp"
+
+static_assert(!duckdb_compat::FilterKind::BLOOM_FILTER ||
+                  static_cast<int>(*duckdb_compat::FilterKind::BLOOM_FILTER) == 10,
+              "Bloom filter must retain its type value");
+using ProbeDefaultSchemaName = duckdb_compat::DefaultSchemaName;
+static void ProbeMutableValidity(duckdb::Vector &v) {
+	duckdb_compat::MutableValidity(v).SetInvalid(0);
+}
+static void ProbeAlias() {
+	auto type = duckdb_compat::WithAlias(duckdb::LogicalType::VARCHAR, "probe");
+	(void)type;
+}
+static void ProbeAssignBindNames(duckdb_compat::BindNames &names) {
+	duckdb_compat::AssignBindNames(names, std::vector<std::string> {"a", "b"});
+}
+using ProbeBindNamedParameters = duckdb_compat::BindNamedParameters;
+using ProbeCopyOptions = duckdb_compat::CopyOptions;
+using ProbeGetBindInfoInput = duckdb_compat::GetBindInfoInput;
+static duckdb::BindInfo ProbeBindInfo(ProbeGetBindInfoInput input, duckdb::TableCatalogEntry &table) {
+	auto data = duckdb_compat::GetBindData(input);
+	(void)data;
+	return duckdb_compat::MakeTableBindInfo(table);
+}
+static void ProbeParsedConstant(const duckdb::Value &value) {
+	auto expression = duckdb_compat::ParsedConstant(value);
+	(void)expression;
+}
 
 namespace duckdb {
 
@@ -44,8 +73,7 @@ static void ProbeScalar(DataChunk &args, ExpressionState &, Vector &result) {
 }
 
 static unique_ptr<FunctionData> ProbeCopyBind(ClientContext &, CopyFunctionBindInput &,
-                                              const duckdb_compat::CopyBindNames &names,
-                                              const vector<LogicalType> &) {
+                                              const duckdb_compat::CopyBindNames &names, const vector<LogicalType> &) {
 	for (auto &n : names) {
 		(void)duckdb_compat::Str(n);
 	}
@@ -65,8 +93,12 @@ void ProbeQuery(ClientContext &ctx) {
 	Connection con(*ctx.db);
 	auto res = con.Query("SELECT 1 AS a");
 	std::vector<std::string> names = duckdb_compat::ResultNames(*res);
+	const auto &types = duckdb_compat::ResultTypes(*res);
+	Value first = duckdb_compat::ResultValue(*res, 0, 0);
 	std::vector<std::vector<Value>> rows = duckdb_compat::FetchRows(*res);
 	(void)names;
+	(void)types;
+	(void)first;
 	(void)rows;
 }
 
@@ -74,10 +106,20 @@ void ProbeFunctions() {
 	const std::string name = "probe_runtime_name";
 	TableFunctionSet set(duckdb_compat::FunctionName(name));
 	TableFunction tf(duckdb_compat::FunctionName(name), {LogicalType::VARCHAR}, nullptr, ProbeBind);
+	duckdb_compat::SetTableEntryGetter(
+	    tf, +[](duckdb::optional_ptr<const duckdb::FunctionData>) -> duckdb::optional_ptr<duckdb::TableCatalogEntry> {
+		    return nullptr;
+	    });
 	duckdb_compat::AddNamedParameter(tf, "framing", LogicalType::VARCHAR);
+	duckdb_compat::SetVarArgs(tf, LogicalType::VARCHAR);
 	duckdb_compat::NameParameters(tf, {"path"});
 	set.AddFunction(tf);
 	duckdb_compat::ForEachFunction(set, [](TableFunction &fun) { duckdb_compat::NameParameters(fun, {"path"}); });
+	CreateTableFunctionInfo described(tf);
+	FunctionDescription description;
+	description.parameter_names = {"path"};
+	described.descriptions.push_back(std::move(description));
+	duckdb_compat::NameFunctionsFromDescriptions(described);
 	CopyFunction cf("probe");
 	cf.copy_to_bind = ProbeCopyBind;
 	(void)ProbeBindInput;

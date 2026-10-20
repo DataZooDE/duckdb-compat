@@ -63,6 +63,22 @@ submodules when it builds.
 | `dc::SetVectorSize(vec, n)` | no-op | `FlatVector::SetSize`: a vector filled with `SetValue` or through its data keeps size 0 otherwise. For chunks use `chunk.SetChildCardinality(n)` (1.5.6 has it too) |
 | `dc::FlatData<T>(vec)` | `FlatVector::GetData<T>` | `FlatVector::GetDataMutable<T>` (`GetData` is const) |
 | `dc::ReferenceIndex(ref)`, `dc::Children(expr)`, `dc::ConstantValue(constant)` | public `index` / `children` / `value` | `Index()`, `GetChildren[Mutable]()`, `GetValue()` |
+| `dc::WithAlias(type, alias)`, `dc::ParsedConstant(value)` | legacy aliases and constant parser nodes | typed aliases and `ConstantExpression::FromValue` |
+| `dc::SetVarArgs(fn, type)` | `varargs` member | signature method |
+| `dc::GetBindData(input)`, `dc::GetBindInfoInput` | get-bind-info callback receives bind data directly | callback receives an input wrapper with `bind_data`; the fallback accepts only the callback input type |
+| `dc::MakeTableBindInfo(table)`, `dc::SetTableEntryGetter(fn, callback)` | `BindInfo(ScanType::TABLE)` and `get_bind_info` identify a table | `BindInfo(table)` and `get_table_entry` identify the table; register both callbacks together |
+| `dc::NameFunctionsFromDescriptions(info)` | names every mutable overload from descriptions | names every signature overload; throws if overload and description counts differ |
+| `dc::ResultValue(result, col, row)` | `result.GetValue` | `result.Collection().GetValue` |
+
+### Table filters (`duckdb_compat/filter.hpp`)
+
+| Helper | 1.4 / 1.5 | 2.0 |
+|---|---|---|
+| `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, filter class aliases | current legacy enum and classes; Bloom is absent on 1.4 | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER` |
+| `dc::FilterCount`, `dc::ForEachFilter`, `dc::SetFilter` | public filter map | `TableFilterSet` iterators and setters; `ForEachFilter` rejects unsupported multi-column filters |
+| `dc::FilterToString` | `TableFilter::ToString` | `ExpressionFilter::ToString` for expression filters |
+| `dc::MakeDynamicFilterData`, `dc::DynamicSnapshot` | nested legacy constant filter | direct comparison and constant state |
+| `dc::IsOptionalExpressionFilter`, `dc::SimpleExpressionTree` | no expression filter; returns false or empty | recognizes optional wrappers and simple comparisons/conjunctions; drops optional AND children but never OR children |
 
 **macOS on 2.0:** the bundled httplib reads the keychain whenever it is built
 with OpenSSL, so an extension that uses `duckdb_httplib_openssl` must link
@@ -96,7 +112,8 @@ Rules for adding a helper:
 4. Make every member lookup *dependent*: reach it through a template
    parameter. A name looked up in a concrete class, or a type that only some
    versions have (`Identifier`), is resolved when the template is defined, and
-   SFINAE cannot discard it. Guard such types with `__has_include`.
+   SFINAE cannot discard it. Do not use `__has_include` for DuckDB headers:
+   a system installation can make it true for the wrong source tree.
 
 ## Tests
 
@@ -107,3 +124,5 @@ Rules for adding a helper:
   DuckDB line. CI runs it for 1.4.5, 1.5.6 and the 2.0 commit that
   community-extensions builds against. Locally:
   `g++ -std=c++17 -fsyntax-only -Iinclude -I<duckdb>/src/include test/probe.cpp`.
+- The table-filter probe uses the same include order:
+  `g++ -std=c++17 -fsyntax-only -Iinclude -I<duckdb>/src/include test/filter_probe.cpp`.

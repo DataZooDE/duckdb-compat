@@ -242,24 +242,24 @@ inline duckdb::BindInfo MakeTableBindInfo(duckdb::TableCatalogEntry &table) {
 }
 
 namespace detail {
-template <class FUNCTION, class CALLBACK>
-auto SetTableEntryGetter(FUNCTION &function, CALLBACK callback, int)
+template <class FUNCTION, class GETTER_FN>
+auto SetTableEntryGetter(FUNCTION &function, GETTER_FN callback, int)
     -> decltype(function.get_table_entry = callback, void()) {
 	function.get_table_entry = callback;
 }
-template <class FUNCTION, class CALLBACK>
-void SetTableEntryGetter(FUNCTION &, CALLBACK, long) {
+template <class FUNCTION, class GETTER_FN>
+void SetTableEntryGetter(FUNCTION &, GETTER_FN, long) {
 	// Older DuckDB releases use get_bind_info to identify the table entry.
 }
 } // namespace detail
 
 //! Register this together with get_bind_info for catalog scans. DuckDB 2.0
 //! asks get_table_entry when binding DELETE/UPDATE; older lines use bind info.
-template <class FUNCTION, class CALLBACK>
-void SetTableEntryGetter(FUNCTION &function, CALLBACK callback) {
+template <class FUNCTION, class GETTER_FN>
+void SetTableEntryGetter(FUNCTION &function, GETTER_FN callback) {
 	static_assert(std::is_same_v<std::decay_t<FUNCTION>, duckdb::TableFunction>,
 	              "Table entry getter requires a TableFunction");
-	static_assert(std::is_invocable_r_v<duckdb::optional_ptr<duckdb::TableCatalogEntry>, CALLBACK,
+	static_assert(std::is_invocable_r_v<duckdb::optional_ptr<duckdb::TableCatalogEntry>, GETTER_FN,
 	                                    duckdb::optional_ptr<const duckdb::FunctionData>>,
 	              "Table entry getter must accept bind data and return a table entry");
 	detail::SetTableEntryGetter(function, callback, 0);

@@ -64,6 +64,8 @@ submodules when it builds.
 | `dc::SetVectorSize(vec, n)` | no-op | `FlatVector::SetSize`: a vector filled with `SetValue` or through its data keeps size 0 otherwise. For chunks use `chunk.SetChildCardinality(n)` (1.5.6 has it too) |
 | `dc::FlatData<T>(vec)` | `FlatVector::GetData<T>` | `FlatVector::GetDataMutable<T>` (`GetData` is const) |
 | `dc::ReferenceIndex(ref)`, `dc::Children(expr)`, `dc::ConstantValue(constant)` | public `index` / `children` / `value` | `Index()`, `GetChildren[Mutable]()`, `GetValue()` |
+| `dc::MutableExpressionChildren(op)` | public `BoundOperatorExpression::children` | `BoundOperatorExpression::GetChildrenMutable()`; used to construct filter expression trees in tests |
+| `dc::MakeBoundScalarExpression(return_type, scalar_function, arguments)` | `BoundFunctionExpression(return_type, ScalarFunction, arguments, bind_data)` | `BoundFunctionExpression(BoundScalarFunction, arguments, bind_data)`; used to probe optional filter trees |
 | `dc::WithAlias(type, alias)`, `dc::ParsedConstant(value)` | legacy aliases and constant parser nodes | typed aliases and `ConstantExpression::FromValue` |
 | `dc::SetVarArgs(fn, type)` | `varargs` member | signature method |
 | `dc::GetBindData(input)`, `dc::GetBindInfoInput` | get-bind-info callback receives bind data directly | callback receives an input wrapper with `bind_data`; the fallback accepts only the callback input type |
@@ -76,12 +78,21 @@ submodules when it builds.
 | `dc::CopyOptions` | copy bind input option type | copy bind input option type, read from the current API shape |
 | `dc::HasInitGlobal(fn)` | reads a function object's `init_global` | reads the pointer's `init_global` |
 | `dc::DefaultSchemaName` | string return type of `GetDefaultSchema` | optional identifier return type of `GetDefaultSchema` |
+| `dc::QualifiedCatalog`, `dc::QualifiedSchema`, `dc::QualifiedLocalName`, `dc::QualifiedWithSchema` | read and rebuild the public catalog/schema/name fields | read and rebuild the private qualified-name representation through its accessors |
+| `dc::RegisterStorageExtension(config, name, extension)` | assign into `config.storage_extensions` | call the storage-extension registration method |
+| `dc::NamedParameterTypes(function)` | read named-parameter types from the legacy map | read typed keyword arguments from the signature |
+| `dc::FunctionArgumentTypes(function)` | read the public positional argument vector | read the signature's positional argument types |
+| `dc::TypeInfoIdentity(type)` | identify shared logical-type extra info through the legacy API | identify it through the current type-info handle |
 
 ### Table filters (`duckdb_compat/filter.hpp`)
 
 | Helper | 1.4 / 1.5 | 2.0 |
 |---|---|---|
 | `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, `dc::NEW_TABLE_FILTERS`, filter class aliases | current legacy enum and classes; Bloom is absent on 1.4 | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER`; the shape flag selects the complete alias |
+| `dc::FilterKind::STRUCT_EXTRACT` | legacy struct-extract filter kind | renamed legacy struct-extract filter kind |
+| `dc::MatchesConstantFilter(filter, value)` | calls the filter's comparison method | compares values using the legacy filter's comparison type |
+| `dc::CopyFilter(filter)` | calls the virtual copy method | copies the active expression filter |
+| `dc::MakeComparisonExpression(type, left, right)` | constructs a bound comparison expression | uses the comparison function factory; useful for version-neutral filter tests |
 | `dc::FilterCount`, `dc::ForEachFilter`, `dc::SetFilter` | public filter map | `TableFilterSet` iterators and setters; `ForEachFilter` rejects unsupported multi-column filters |
 | `dc::FilterToString` | `TableFilter::ToString` | `ExpressionFilter::ToString` for expression filters; deserialization-only legacy filters have a type label because those classes have no `ToString` |
 | `dc::MakeDynamicFilterData`, `dc::DynamicSnapshot` | nested legacy constant filter | direct comparison and constant state |

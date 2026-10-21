@@ -97,6 +97,14 @@ template <class E>
 constexpr auto InKind(long) -> decltype(E::IN_FILTER) {
 	return E::IN_FILTER;
 }
+template <class E>
+constexpr auto StructKind(int) -> decltype(E::LEGACY_STRUCT_EXTRACT) {
+	return E::LEGACY_STRUCT_EXTRACT;
+}
+template <class E>
+constexpr auto StructKind(long) -> decltype(E::STRUCT_EXTRACT) {
+	return E::STRUCT_EXTRACT;
+}
 
 // Bind-info callbacks receive bind data directly on 1.x and an input wrapper
 // on 2.0. Only the exact legacy callback argument may use the fallback.

@@ -20,6 +20,8 @@
 #include "duckdb/parser/qualified_name.hpp"
 #include "duckdb/catalog/catalog.hpp"
 #include "duckdb/catalog/entry_lookup_info.hpp"
+#include "duckdb/storage/storage_extension.hpp"
+#include "duckdb/main/config.hpp"
 #include "duckdb/planner/expression/bound_conjunction_expression.hpp"
 #include "duckdb/planner/expression/bound_constant_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
@@ -27,12 +29,50 @@
 #include "duckdb_compat/dispatch.hpp"
 
 #include <optional>
+#include <map>
 #include <string>
 #include <tuple>
 #include <type_traits>
 #include <vector>
 
 namespace duckdb_compat {
+
+namespace detail {
+template <class TYPE>
+auto TypeInfoIdentity(const TYPE &type, int) -> decltype(static_cast<const void *>(&type.GetTypeInfo())) {
+	return &type.GetTypeInfo();
+}
+template <class TYPE>
+auto TypeInfoIdentity(const TYPE &type, long) -> decltype(static_cast<const void *>(type.AuxInfo().get())) {
+	return type.AuxInfo().get();
+}
+} // namespace detail
+inline const void *TypeInfoIdentity(const duckdb::LogicalType &type) {
+	return detail::TypeInfoIdentity(type, 0);
+}
+
+namespace detail {
+template <class EXTENSION = duckdb::StorageExtension, class CONFIG>
+auto RegisterStorageExtension(CONFIG &config, const std::string &name,
+                              duckdb::shared_ptr<duckdb::StorageExtension> extension, int)
+    -> decltype(EXTENSION::Register(config, name, std::move(extension)), void()) {
+	EXTENSION::Register(config, name, std::move(extension));
+}
+template <class CONFIG>
+auto RegisterStorageExtension(CONFIG &config, const std::string &name,
+                              duckdb::shared_ptr<duckdb::StorageExtension> extension, long)
+    -> decltype(config.storage_extensions[name] = duckdb::unique_ptr<duckdb::StorageExtension>(), void()) {
+	auto owned = duckdb::make_uniq<duckdb::StorageExtension>();
+	owned->attach = extension->attach;
+	owned->create_transaction_manager = extension->create_transaction_manager;
+	owned->storage_info = extension->storage_info;
+	config.storage_extensions[name] = std::move(owned);
+}
+} // namespace detail
+inline void RegisterStorageExtension(duckdb::DBConfig &config, const std::string &name,
+                                     duckdb::shared_ptr<duckdb::StorageExtension> extension) {
+	detail::RegisterStorageExtension(config, name, std::move(extension), 0);
+}
 
 // Function::name is string on 1.x and Identifier on 2.0. Reading its type
 // avoids finding an unrelated system DuckDB header on older source trees.
@@ -313,6 +353,34 @@ void AddNamedParameter(FN &fn, const std::string &name, const duckdb::LogicalTyp
 
 namespace detail {
 template <class FN>
+auto NamedParameterTypes(const FN &fn, int) -> decltype(fn.GetSignature().GetTypedKwargs(),
+                                                        std::map<std::string, duckdb::LogicalType>()) {
+	std::map<std::string, duckdb::LogicalType> result;
+	auto options = fn.GetSignature().GetTypedKwargs();
+	if (options) {
+		for (const auto &option : options->GetOptions()) {
+			result.emplace(::duckdb_compat::Str(option.name), option.type);
+		}
+	}
+	return result;
+}
+template <class FN>
+auto NamedParameterTypes(const FN &fn, long) -> decltype(fn.named_parameters,
+                                                          std::map<std::string, duckdb::LogicalType>()) {
+	std::map<std::string, duckdb::LogicalType> result;
+	for (const auto &option : fn.named_parameters) {
+		result.emplace(::duckdb_compat::Str(option.first), option.second);
+	}
+	return result;
+}
+} // namespace detail
+template <class FN>
+std::map<std::string, duckdb::LogicalType> NamedParameterTypes(const FN &fn) {
+	return detail::NamedParameterTypes(fn, 0);
+}
+
+namespace detail {
+template <class FN>
 auto SetVarArgs(FN &fn, const duckdb::LogicalType &type, int)
     -> decltype(fn.GetSignature().AddArgs(FunctionNameType("args"), type), void()) {
 	fn.GetSignature().AddArgs(FunctionNameType("args"), type);
@@ -430,6 +498,29 @@ void NameFunctionsFromDescriptions(INFO &info) {
 		NameParameters(fn, info.descriptions[index].parameter_names);
 		index++;
 	});
+}
+
+// Read positional argument types across the legacy function fields and 2.0 signatures.
+namespace detail {
+template <class FN>
+auto FunctionArgumentTypes(const FN &fn, int)
+    -> decltype(fn.GetSignature().GetPositionalParameterCount(), fn.GetSignature().GetParameter(duckdb::idx_t{}).GetType(),
+                std::vector<duckdb::LogicalType>{}) {
+    const auto &signature = fn.GetSignature();
+    std::vector<duckdb::LogicalType> result;
+    for (duckdb::idx_t i = 0; i < signature.GetPositionalParameterCount(); i++) {
+        result.push_back(signature.GetParameter(i).GetType());
+    }
+    return result;
+}
+template <class FN>
+auto FunctionArgumentTypes(const FN &fn, long) -> decltype(fn.arguments, std::vector<duckdb::LogicalType>{}) {
+    return {fn.arguments.begin(), fn.arguments.end()};
+}
+} // namespace detail
+template <class FN>
+std::vector<duckdb::LogicalType> FunctionArgumentTypes(const FN &fn) {
+    return detail::FunctionArgumentTypes(fn, 0);
 }
 
 // --- Query results --------------------------------------------------------------
@@ -593,6 +684,48 @@ inline std::vector<IdentifierType> Idents(const std::vector<std::string> &names)
 		result.emplace_back(name);
 	}
 	return result;
+}
+
+namespace detail {
+template <class QN> auto QualifiedCatalog(const QN &name, int) -> decltype(::duckdb_compat::Str(name.Catalog())) {
+	return ::duckdb_compat::Str(name.Catalog());
+}
+template <class QN> auto QualifiedCatalog(const QN &name, long) -> decltype(name.catalog) {
+	return name.catalog;
+}
+template <class QN> auto QualifiedSchema(const QN &name, int) -> decltype(::duckdb_compat::Str(name.Schema())) {
+	return ::duckdb_compat::Str(name.Schema());
+}
+template <class QN> auto QualifiedSchema(const QN &name, long) -> decltype(name.schema) {
+	return name.schema;
+}
+template <class QN> auto QualifiedLocalName(const QN &name, int) -> decltype(::duckdb_compat::Str(name.Name())) {
+	return ::duckdb_compat::Str(name.Name());
+}
+template <class QN> auto QualifiedLocalName(const QN &name, long) -> decltype(name.name) {
+	return name.name;
+}
+template <class QN>
+auto QualifiedWithSchema(const QN &name, const std::string &schema, int)
+    -> decltype(name.WithQualification(std::declval<duckdb::vector<IdentifierType>>())) {
+	duckdb::vector<IdentifierType> path;
+	auto catalog = QualifiedCatalog(name, 0);
+	if (!catalog.empty()) {
+		path.emplace_back(catalog);
+	}
+	path.emplace_back(schema);
+	return name.WithQualification(std::move(path));
+}
+template <class QN> QN QualifiedWithSchema(QN name, const std::string &schema, long) {
+	name.schema = schema;
+	return name;
+}
+} // namespace detail
+template <class QN> std::string QualifiedCatalog(const QN &name) { return detail::QualifiedCatalog(name, 0); }
+template <class QN> std::string QualifiedSchema(const QN &name) { return detail::QualifiedSchema(name, 0); }
+template <class QN> std::string QualifiedLocalName(const QN &name) { return detail::QualifiedLocalName(name, 0); }
+template <class QN> QN QualifiedWithSchema(const QN &name, const std::string &schema) {
+	return detail::QualifiedWithSchema(name, schema, 0);
 }
 
 // --- UNIQUE / PRIMARY KEY constraints over named columns --------------------------

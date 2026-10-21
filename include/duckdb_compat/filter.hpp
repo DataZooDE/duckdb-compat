@@ -12,10 +12,13 @@
 // LogicalGet brings in TableFilterSet's iterator entry on 2.0.
 #include "duckdb/planner/expression/bound_comparison_expression.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
+#include "duckdb/planner/expression/bound_function_expression.hpp"
+#include "duckdb/function/scalar_function.hpp"
 #include "duckdb/planner/filter/expression_filter.hpp"
 #include "duckdb/planner/operator/logical_get.hpp"
 // join_hashtable brings in legacy bloom filter declarations on 1.x.
 #include "duckdb/execution/join_hashtable.hpp"
+#include "duckdb/common/value_operations/value_operations.hpp"
 
 // The legacy classes keep the old filter semantics in DuckDB 2.0. Forward
 // declarations make both names legal; only the selected, complete type is used.
@@ -55,6 +58,58 @@ using DynamicFilter = std::conditional_t<NEW_TABLE_FILTERS, duckdb::LegacyDynami
 using IsNullFilter = std::conditional_t<NEW_TABLE_FILTERS, duckdb::LegacyIsNullFilter, duckdb::IsNullFilter>;
 using IsNotNullFilter = std::conditional_t<NEW_TABLE_FILTERS, duckdb::LegacyIsNotNullFilter, duckdb::IsNotNullFilter>;
 using StructFilter = std::conditional_t<NEW_TABLE_FILTERS, duckdb::LegacyStructFilter, duckdb::StructFilter>;
+namespace detail {
+template <class COMPARISON>
+auto MakeComparisonExpression(duckdb::ExpressionType type, duckdb::unique_ptr<duckdb::Expression> left,
+                              duckdb::unique_ptr<duckdb::Expression> right, int)
+    -> decltype(COMPARISON::Create(type, std::move(left), std::move(right))) {
+    return COMPARISON::Create(type, std::move(left), std::move(right));
+}
+template <class COMPARISON>
+auto MakeComparisonExpression(duckdb::ExpressionType type, duckdb::unique_ptr<duckdb::Expression> left,
+                              duckdb::unique_ptr<duckdb::Expression> right, long)
+    -> decltype(duckdb::make_uniq<COMPARISON>(type, std::move(left), std::move(right))) {
+    return duckdb::make_uniq<COMPARISON>(type, std::move(left), std::move(right));
+}
+template <class FILTER> auto CopyFilter(const FILTER &filter, int) -> decltype(filter.Copy()) {
+	return filter.Copy();
+}
+template <class FILTER, class EF = duckdb::ExpressionFilter>
+auto CopyFilter(const FILTER &filter, long) -> decltype(filter.template Cast<EF>().Copy()) {
+	return filter.template Cast<EF>().Copy();
+}
+template <class FILTER>
+auto MatchesConstantFilter(const FILTER &filter, const duckdb::Value &value, int)
+    -> decltype(filter.Compare(value)) {
+	return filter.Compare(value);
+}
+template <class FILTER>
+bool MatchesConstantFilter(const FILTER &filter, const duckdb::Value &value, long) {
+	using duckdb::ExpressionType;
+	using duckdb::ValueOperations;
+	switch (filter.comparison_type) {
+	case ExpressionType::COMPARE_EQUAL: return ValueOperations::Equals(value, filter.constant);
+	case ExpressionType::COMPARE_NOTEQUAL: return ValueOperations::NotEquals(value, filter.constant);
+	case ExpressionType::COMPARE_GREATERTHAN: return ValueOperations::GreaterThan(value, filter.constant);
+	case ExpressionType::COMPARE_GREATERTHANOREQUALTO: return ValueOperations::GreaterThanEquals(value, filter.constant);
+	case ExpressionType::COMPARE_LESSTHAN: return ValueOperations::LessThan(value, filter.constant);
+	case ExpressionType::COMPARE_LESSTHANOREQUALTO: return ValueOperations::LessThanEquals(value, filter.constant);
+	default: throw duckdb::InternalException("Unsupported constant filter comparison");
+	}
+}
+} // namespace detail
+inline duckdb::unique_ptr<duckdb::Expression>
+MakeComparisonExpression(duckdb::ExpressionType type, duckdb::unique_ptr<duckdb::Expression> left,
+                         duckdb::unique_ptr<duckdb::Expression> right) {
+    return detail::MakeComparisonExpression<duckdb::BoundComparisonExpression>(type, std::move(left), std::move(right), 0);
+}
+inline duckdb::unique_ptr<duckdb::TableFilter> CopyFilter(const duckdb::TableFilter &filter) {
+	return detail::CopyFilter(filter, 0);
+}
+template <class FILTER>
+bool MatchesConstantFilter(const FILTER &filter, const duckdb::Value &value) {
+	return detail::MatchesConstantFilter(filter, value, 0);
+}
 struct FilterKind {
 	//! Optional: check has_value() before comparing a bloom filter kind.
 	static constexpr auto BLOOM_FILTER = detail::BloomKind<duckdb::TableFilterType>(0);
@@ -66,6 +121,7 @@ struct FilterKind {
 	static constexpr auto OPTIONAL_FILTER = detail::OptionalKind<duckdb::TableFilterType>(0);
 	static constexpr auto DYNAMIC_FILTER = detail::DynamicKind<duckdb::TableFilterType>(0);
 	static constexpr auto IN_FILTER = detail::InKind<duckdb::TableFilterType>(0);
+	static constexpr auto STRUCT_EXTRACT = detail::StructKind<duckdb::TableFilterType>(0);
 };
 
 namespace detail {
@@ -158,6 +214,44 @@ inline duckdb::shared_ptr<duckdb::DynamicFilterData> MakeDynamicFilterData(duckd
 																		   duckdb::Value constant, bool initialized) {
 	return detail::MakeDynamicFilterData<duckdb::DynamicFilterData>(comparison, std::move(constant), initialized, 0);
 }
+namespace detail {
+template <class OP> auto MutableExpressionChildren(OP &op, int) -> decltype(op.GetChildrenMutable()) {
+	return op.GetChildrenMutable();
+}
+template <class OP> auto MutableExpressionChildren(OP &op, long) -> decltype((op.children)) {
+	return op.children;
+}
+} // namespace detail
+template <class OP> auto &MutableExpressionChildren(OP &op) {
+	return detail::MutableExpressionChildren(op, 0);
+}
+namespace detail {
+template <class BFE, class FUNC>
+auto MakeBoundScalarExpression(duckdb::LogicalType return_type, FUNC function,
+                               duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> arguments, int)
+    -> decltype(duckdb::make_uniq<BFE>(
+        std::decay_t<decltype(std::declval<BFE &>().Function())>(function), std::move(arguments),
+        duckdb::unique_ptr<duckdb::FunctionData>())) {
+    (void)return_type;
+    using BoundFunction = std::decay_t<decltype(std::declval<BFE &>().Function())>;
+    return duckdb::make_uniq<BFE>(BoundFunction(function), std::move(arguments),
+                                  duckdb::unique_ptr<duckdb::FunctionData>());
+}
+template <class BFE, class FUNC>
+auto MakeBoundScalarExpression(duckdb::LogicalType return_type, FUNC function,
+                               duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> arguments, long)
+    -> decltype(duckdb::make_uniq<BFE>(return_type, function, std::move(arguments),
+                                      duckdb::unique_ptr<duckdb::FunctionData>())) {
+    return duckdb::make_uniq<BFE>(return_type, function, std::move(arguments),
+                                  duckdb::unique_ptr<duckdb::FunctionData>());
+}
+} // namespace detail
+inline duckdb::unique_ptr<duckdb::BoundFunctionExpression>
+MakeBoundScalarExpression(duckdb::LogicalType return_type, duckdb::ScalarFunction function,
+                          duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> arguments) {
+    return detail::MakeBoundScalarExpression<duckdb::BoundFunctionExpression>(
+        return_type, std::move(function), std::move(arguments), 0);
+}
 template <class F> void ForEachFilter(const duckdb::TableFilterSet &set, F &&f) {
 	detail::ForEachFilter(set, std::forward<F>(f), 0);
 }
@@ -192,10 +286,10 @@ std::optional<FilterExpressionNode> FoldConjunction(FilterExpressionNode::Kind k
 	FilterExpressionNode node{kind, duckdb::ExpressionType::COMPARE_EQUAL, duckdb::Value(), {}};
 	for (const auto &child : children) {
 		if (optional(child)) {
-			if (kind == FilterExpressionNode::Kind::CONJUNCTION_OR) {
-				return std::nullopt;
-			}
-			continue;
+			// Optional expressions are scan hints, not redundant SQL conjuncts.
+			// Dropping one would make the generated OPTIONS differ from the tree
+			// handed to the scan. Keep the entire filter for local evaluation.
+			return std::nullopt;
 		}
 		auto converted = convert(child);
 		if (!converted) {

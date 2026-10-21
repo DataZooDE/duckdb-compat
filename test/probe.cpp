@@ -24,14 +24,61 @@
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/storage/storage_extension.hpp"
+#include "duckdb/main/config.hpp"
 #include "duckdb_compat.hpp"
 #include "duckdb_compat/filter.hpp"
+#include "duckdb/planner/expression/bound_operator_expression.hpp"
+#include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include <type_traits>
 
 static_assert(!duckdb_compat::FilterKind::BLOOM_FILTER ||
                   static_cast<int>(*duckdb_compat::FilterKind::BLOOM_FILTER) == 10,
               "Bloom filter must retain its type value");
+static_assert(static_cast<int>(duckdb_compat::FilterKind::STRUCT_EXTRACT) == 5,
+              "Struct filter kind must retain its type value");
+static void ProbeMutableExpressionChildren(duckdb::BoundOperatorExpression &op) {
+	(void)duckdb_compat::MutableExpressionChildren(op);
+}
+static void ProbeBoundScalarExpression() {
+	auto varchar_type = duckdb::LogicalType::VARCHAR;
+	auto boolean_type = duckdb::LogicalType::BOOLEAN;
+	duckdb::ScalarFunction function(duckdb_compat::Ident("probe_function"), {varchar_type}, boolean_type, nullptr);
+	duckdb::vector<duckdb::unique_ptr<duckdb::Expression>> arguments;
+	arguments.push_back(duckdb::make_uniq<duckdb::BoundReferenceExpression>(varchar_type, 0));
+	(void)duckdb_compat::MakeBoundScalarExpression(boolean_type, std::move(function), std::move(arguments));
+}
+static void ProbeConstantFilter(const duckdb_compat::ConstantFilter &filter, const duckdb::Value &value) {
+	(void)duckdb_compat::MatchesConstantFilter(filter, value);
+}
+static void ProbeCopyFilter(const duckdb::TableFilter &filter) {
+	(void)duckdb_compat::CopyFilter(filter);
+}
+static void ProbeComparisonExpression() {
+	(void)duckdb_compat::MakeComparisonExpression(
+	    duckdb::ExpressionType::COMPARE_EQUAL,
+	    duckdb::make_uniq<duckdb::BoundReferenceExpression>(duckdb::LogicalType::VARCHAR, 0),
+	    duckdb::make_uniq<duckdb::BoundConstantExpression>(duckdb::Value("x")));
+}
+static void ProbeStorageRegistration(duckdb::DBConfig &config, duckdb::shared_ptr<duckdb::StorageExtension> extension) {
+	duckdb_compat::RegisterStorageExtension(config, "probe", std::move(extension));
+}
+static void ProbeNamedParameterTypes(const duckdb::TableFunction &function) {
+	(void)duckdb_compat::NamedParameterTypes(function);
+}
+static void ProbeFunctionArgumentTypes(const duckdb::TableFunction &function) {
+	(void)duckdb_compat::FunctionArgumentTypes(function);
+}
+static void ProbeTypeInfoIdentity(const duckdb::LogicalType &type) {
+	(void)duckdb_compat::TypeInfoIdentity(type);
+}
 using ProbeDefaultSchemaName = duckdb_compat::DefaultSchemaName;
+static void ProbeQualifiedName(const duckdb::QualifiedName &name) {
+	(void)duckdb_compat::QualifiedCatalog(name);
+	(void)duckdb_compat::QualifiedSchema(name);
+	(void)duckdb_compat::QualifiedLocalName(name);
+	(void)duckdb_compat::QualifiedWithSchema(name, "main");
+}
 static_assert(!std::is_convertible_v<duckdb_compat::detail::RowCount, std::string>);
 static_assert(!std::is_convertible_v<duckdb_compat::detail::RowCount, void *>);
 static void ProbeMutableValidity(duckdb::Vector &v) {

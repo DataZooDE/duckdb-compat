@@ -18,6 +18,13 @@
 #include <type_traits>
 #include <utility>
 
+namespace duckdb {
+// Both names, so the shape-based selection below compiles on every line; only the
+// one this DuckDB defines is ever instantiated.
+class LimitPercentModifier;
+class LegacyLimitPercentModifier;
+} // namespace duckdb
+
 namespace duckdb_compat {
 
 // Parse without a connection. 2.0 exposes the built-in parser factory;
@@ -165,12 +172,21 @@ bool VisitDmlQuery(const duckdb::QueryNode &node, U update, D del, I insert, M m
 	return false;
 }
 
-template <class F> void VisitLegacyLimitPercent(const duckdb::ResultModifier &modifier, F &&fn) {
-#ifdef DUCKDB_COMPAT_DML_QUERY_NODES
-	fn(modifier.Cast<duckdb::LegacyLimitPercentModifier>());
-#else
-	fn(modifier.Cast<duckdb::LimitPercentModifier>());
-#endif
+namespace detail {
+// 2.0 renamed LIMIT_PERCENT_MODIFIER / LimitPercentModifier to the LEGACY_ names.
+// Detected from the enum's shape, so no consumer macro is needed.
+template <class E, class = void>
+struct HasLegacyLimitPercent : std::false_type {};
+template <class E>
+struct HasLegacyLimitPercent<E, std::void_t<decltype(E::LEGACY_LIMIT_PERCENT_MODIFIER)>> : std::true_type {};
+} // namespace detail
+
+//! Call fn with the percent-limit modifier as its concrete class on every line.
+template <class F, class M = duckdb::ResultModifier>
+void VisitLegacyLimitPercent(const M &modifier, F &&fn) {
+	using T = typename std::conditional<detail::HasLegacyLimitPercent<duckdb::ResultModifierType>::value,
+	                                    duckdb::LegacyLimitPercentModifier, duckdb::LimitPercentModifier>::type;
+	fn(modifier.template Cast<T>());
 }
 
 } // namespace duckdb_compat

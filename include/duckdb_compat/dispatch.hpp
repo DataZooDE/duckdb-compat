@@ -150,6 +150,17 @@ void SetFallible(F &fn, long) {
 	fn.errors = decltype(fn.errors)::CAN_THROW_RUNTIME_ERROR;
 }
 
+// --- Function NULL handling: 1.4 has only the public `null_handling` field;
+// 1.5 adds SetNullHandling(); 2.0 keeps only the setter.
+template <class F, class N>
+auto SetNullHandling(F &fn, N value, int) -> decltype(fn.SetNullHandling(value), void()) {
+	fn.SetNullHandling(value);
+}
+template <class F, class N>
+auto SetNullHandling(F &fn, N value, long) -> decltype(fn.null_handling = value, void()) {
+	fn.null_handling = value;
+}
+
 // --- DataChunk cardinality: on 2.0 vectors carry their own size, and
 // DataChunk::SetCardinality (deprecated) sets only the chunk's count. A scan that
 // fills rows with SetValue and then calls SetCardinality leaves its vectors at
@@ -234,6 +245,13 @@ void SetStability(F &fn, S value) {
 template <class F>
 void SetFallible(F &fn) {
 	detail::SetFallible(fn, 0);
+}
+
+//! fn.SetNullHandling(v) where available, else fn.null_handling = v. Works for
+//! scalar and aggregate functions.
+template <class F, class N>
+void SetNullHandling(F &fn, N value) {
+	detail::SetNullHandling(fn, value, 0);
 }
 
 //! Set a DataChunk's row count AND its vectors' sizes. Use it wherever a table

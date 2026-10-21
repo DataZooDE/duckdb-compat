@@ -439,6 +439,42 @@ void NameParameters(FN &fn, const std::vector<std::string> &names) {
 	detail::NameParameters(fn, names, 0);
 }
 
+namespace detail {
+// 2.0: replace each positional parameter by a STANDARD one (positional or by name). The
+// parameter type is taken from the signature, so nothing names duckdb::FunctionParameter
+// directly (it does not exist before 2.0).
+template <class FN>
+auto NameArguments(FN &fn, const std::vector<std::string> &names, int)
+    -> decltype(fn.GetSignature().GetParameter(0) =
+                    std::decay_t<decltype(fn.GetSignature().GetParameter(0))>(
+                        FunctionNameType(std::string()), fn.GetSignature().GetParameter(0).GetType()),
+                void()) {
+	using PARAM = std::decay_t<decltype(fn.GetSignature().GetParameter(0))>;
+	auto &signature = fn.GetSignature();
+	for (duckdb::idx_t i = 0; i < signature.GetParameterCount() && i < names.size(); i++) {
+		auto &param = signature.GetParameter(i);
+		if (!param.AcceptsPosition()) {
+			break;
+		}
+		param = PARAM(FunctionNameType(names[i]), param.GetType());
+	}
+}
+template <class FN>
+auto NameArguments(FN &fn, const std::vector<std::string> &, long) -> decltype((void)fn.name, void()) {
+}
+} // namespace detail
+
+//! Name a scalar/aggregate function's positional parameters AND let callers pass them by
+//! that name, e.g. f(a, b, model := 'x'). Before 2.0 a `name := value` argument of a scalar
+//! function binds by position, so this is a no-op. On 2.0 constructor-made parameters are
+//! positional-only ("col0, /") and a named argument fails to bind; this turns them into
+//! standard parameters. Use NameParameters instead when only duckdb_functions() should show
+//! the names.
+template <class FN>
+void NameArguments(FN &fn, const std::vector<std::string> &names) {
+	detail::NameArguments(fn, names, 0);
+}
+
 // --- Changing every overload of a function set ---------------------------------
 // Before 2.0: set.functions is vector<T>, mutable in place. 2.0: it holds
 // immutable shared_ptr<const T>, changed only through ApplyToFunctions().
@@ -496,6 +532,27 @@ void NameFunctionsFromDescriptions(INFO &info) {
 	// descriptions[i] names overload i in ForEachFunction/AddFunction order.
 	ForEachFunction(info.functions, [&](auto &fn) {
 		NameParameters(fn, info.descriptions[index].parameter_names);
+		index++;
+	});
+}
+
+//! NameArguments for every overload, from the info's descriptions (descriptions[i] names
+//! overload i). Same count rule as NameFunctionsFromDescriptions.
+template <class INFO>
+void NameArgumentsFromDescriptions(INFO &info) {
+	if (info.descriptions.empty()) {
+		return;
+	}
+	duckdb::idx_t count = 0;
+	ForEachFunction(info.functions, [&](auto &) { count++; });
+	if (count != info.descriptions.size()) {
+		throw duckdb::InternalException("Function descriptions do not match overload count (" +
+		                                std::to_string(count) + " overloads, " +
+		                                std::to_string(info.descriptions.size()) + " descriptions)");
+	}
+	duckdb::idx_t index = 0;
+	ForEachFunction(info.functions, [&](auto &fn) {
+		NameArguments(fn, info.descriptions[index].parameter_names);
 		index++;
 	});
 }

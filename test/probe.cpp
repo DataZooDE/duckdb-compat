@@ -21,6 +21,7 @@
 #include "duckdb/parser/parsed_data/create_schema_info.hpp"
 #include "duckdb/parser/parsed_data/create_sequence_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/parsed_data/create_scalar_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
@@ -200,6 +201,11 @@ void Probe(optional_ptr<FileOpener> opener, ClientContext &ctx, const BaseSecret
 	duckdb_compat::SetStability(sf, FunctionStability::VOLATILE);
 	duckdb_compat::SetFallible(sf);
 	duckdb_compat::SetNullHandling(sf, FunctionNullHandling::SPECIAL_HANDLING);
+	duckdb_compat::NameArguments(sf, {"text"});
+	ScalarFunctionSet sset("probe");
+	sset.AddFunction(sf);
+	CreateScalarFunctionInfo sinfo(sset);
+	duckdb_compat::NameArgumentsFromDescriptions(sinfo);
 	(void)tf;
 }
 

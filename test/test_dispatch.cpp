@@ -46,6 +46,18 @@ struct NewErrFn {
 	}
 };
 
+enum class Nulls { DEFAULT_NULL_HANDLING, SPECIAL_HANDLING };
+// 1.4: a public `null_handling` field; 1.5 and 2.0: SetNullHandling().
+struct OldNullFn {
+	Nulls null_handling = Nulls::DEFAULT_NULL_HANDLING;
+};
+struct NewNullFn {
+	Nulls n = Nulls::DEFAULT_NULL_HANDLING;
+	void SetNullHandling(Nulls v) {
+		n = v;
+	}
+};
+
 struct OldCtx {
 	std::atomic<bool> interrupted {true};
 };
@@ -239,6 +251,13 @@ int main() {
 	NewErrFn ne;
 	dc::SetFallible(ne);
 	assert(ne.fallible);
+
+	OldNullFn on;
+	dc::SetNullHandling(on, Nulls::SPECIAL_HANDLING);
+	assert(on.null_handling == Nulls::SPECIAL_HANDLING);
+	NewNullFn nn;
+	dc::SetNullHandling(nn, Nulls::SPECIAL_HANDLING);
+	assert(nn.n == Nulls::SPECIAL_HANDLING);
 
 	OldChunk och;
 	dc::SetChildCardinality(och, 7);

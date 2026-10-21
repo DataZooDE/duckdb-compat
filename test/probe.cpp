@@ -199,6 +199,7 @@ void Probe(optional_ptr<FileOpener> opener, ClientContext &ctx, const BaseSecret
 	ScalarFunction sf("probe", {LogicalType::VARCHAR}, LogicalType::BIGINT, ProbeScalar);
 	duckdb_compat::SetStability(sf, FunctionStability::VOLATILE);
 	duckdb_compat::SetFallible(sf);
+	duckdb_compat::SetNullHandling(sf, FunctionNullHandling::SPECIAL_HANDLING);
 	(void)tf;
 }
 

@@ -176,6 +176,20 @@ inline duckdb::SettingLookupResult TryGetSetting(duckdb::optional_ptr<duckdb::Fi
 	return detail::TryGetSetting(opener, key, value, 0);
 }
 
+namespace detail {
+template <class C> auto TryGetContextSetting(C &context, const std::string &key, duckdb::Value &value, int)
+    -> decltype(context.TryGetCurrentSetting(IdentifierType(key), value)) {
+	return context.TryGetCurrentSetting(IdentifierType(key), value);
+}
+template <class C> auto TryGetContextSetting(C &context, const std::string &key, duckdb::Value &value, long)
+    -> decltype(context.TryGetCurrentSetting(key, value)) {
+	return context.TryGetCurrentSetting(key, value);
+}
+} // namespace detail
+template <class C> auto TryGetContextSetting(C &context, const std::string &key, duckdb::Value &value) {
+	return detail::TryGetContextSetting(context, key, value, 0);
+}
+
 // --- Unary scalar that may return NULL --------------------------------------
 // Before 2.0: UnaryExecutor::ExecuteWithNulls with a (input, mask, idx) lambda.
 // 2.0: UnaryExecutor::Execute with a lambda returning optional<RESULT>.

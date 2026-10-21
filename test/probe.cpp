@@ -28,6 +28,16 @@
 #include "duckdb/main/config.hpp"
 #include "duckdb_compat.hpp"
 #include "duckdb_compat/filter.hpp"
+#include "duckdb_compat/sql_ast.hpp"
+#include "duckdb/parser/tableref/basetableref.hpp"
+#include "duckdb/parser/statement/insert_statement.hpp"
+#include "duckdb/parser/statement/update_statement.hpp"
+#include "duckdb/parser/statement/delete_statement.hpp"
+#include "duckdb/parser/parsed_data/copy_info.hpp"
+#include "duckdb/parser/expression/columnref_expression.hpp"
+#include "duckdb/parser/expression/subquery_expression.hpp"
+#include "duckdb/parser/expression/function_expression.hpp"
+#include "duckdb/parser/query_node/set_operation_node.hpp"
 #include "duckdb/planner/expression/bound_operator_expression.hpp"
 #include "duckdb/planner/expression/bound_reference_expression.hpp"
 #include <type_traits>
@@ -245,7 +255,74 @@ void ProbeCatalogNames(ClientContext &ctx, Catalog &catalog, const ColumnList &c
 
 	auto statements = duckdb_compat::ParseStatements(ctx, "SELECT 42");
 	(void)statements;
+	Value setting;
+	(void)duckdb_compat::TryGetContextSetting(ctx, schema, setting);
 }
+
+void ProbeSqlAst(const BaseTableRef &base, const InsertStatement &insert, const UpdateStatement &update,
+                 const DeleteStatement &deletion, const CopyInfo &copy, const CommonTableExpressionInfo &cte,
+                 const SubqueryExpression &subquery, const ColumnRefExpression &column,
+                 const FunctionExpression &function, const SetOperationNode &set) {
+	(void)duckdb_compat::ParseBuiltin("SELECT 1");
+	(void)duckdb_compat::AstTarget(base);
+	(void)duckdb_compat::AstTarget(duckdb_compat::DmlNode(insert));
+	(void)duckdb_compat::DmlNode(update).table;
+	(void)duckdb_compat::DmlNode(deletion).table;
+	(void)duckdb_compat::AstTarget(copy);
+	(void)duckdb_compat::CteQuery(cte);
+	(void)duckdb_compat::Subquery(subquery);
+	(void)duckdb_compat::ColumnNames(column);
+	(void)duckdb_compat::FunctionName(function);
+	duckdb_compat::ForEachSetChild(set, [](const QueryNode &) {});
+}
+
+// Fake shapes exercise both dispatch arms even when compiling against just one
+// real DuckDB line. These are syntax probes, so the functions need no runtime.
+namespace sql_ast_fake {
+struct OldTarget { string catalog, schema, table; };
+struct OldDml { int table; };
+struct NewDml { unique_ptr<OldDml> node; };
+struct FakeSelect { unique_ptr<int> node; };
+struct OldCte { unique_ptr<FakeSelect> query; };
+struct NewCte { unique_ptr<int> query_node; };
+struct OldSubquery { unique_ptr<int> subquery; };
+struct NewSubquery {
+	unique_ptr<int> subquery;
+	const unique_ptr<int> &Subquery() const { return subquery; }
+};
+struct OldColumn { vector<string> column_names; };
+struct NewColumn {
+	vector<string> names;
+	const vector<string> &ColumnNames() const { return names; }
+};
+struct OldFunction { string function_name; };
+struct NewFunction {
+	string name;
+	const string &FunctionName() const { return name; }
+};
+struct OldSet { unique_ptr<int> left, right; };
+struct NewSet { vector<unique_ptr<int>> children; };
+
+void Probe(const OldTarget &target, const OldDml &old_dml, const NewDml &new_dml,
+           const OldCte &old_cte, const NewCte &new_cte, const OldSubquery &old_subquery,
+           const NewSubquery &new_subquery, const OldColumn &old_column, const NewColumn &new_column,
+           const OldFunction &old_function, const NewFunction &new_function,
+           const OldSet &old_set, const NewSet &new_set) {
+	(void)duckdb_compat::AstTarget(target);
+	(void)duckdb_compat::DmlNode(old_dml).table;
+	(void)duckdb_compat::DmlNode(new_dml).table;
+	(void)duckdb_compat::CteQuery(old_cte);
+	(void)duckdb_compat::CteQuery(new_cte);
+	(void)duckdb_compat::Subquery(old_subquery);
+	(void)duckdb_compat::Subquery(new_subquery);
+	(void)duckdb_compat::ColumnNames(old_column);
+	(void)duckdb_compat::ColumnNames(new_column);
+	(void)duckdb_compat::FunctionName(old_function);
+	(void)duckdb_compat::FunctionName(new_function);
+	duckdb_compat::ForEachSetChild(old_set, [](const int &) {});
+	duckdb_compat::ForEachSetChild(new_set, [](const int &) {});
+}
+} // namespace sql_ast_fake
 
 void ProbeVectorsAndExpressions(BoundReferenceExpression &ref, BoundConjunctionExpression &conjunction,
                                 const BoundConjunctionExpression &const_conjunction,

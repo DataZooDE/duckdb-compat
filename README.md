@@ -74,6 +74,8 @@ submodules when it builds.
 | `dc::SetVarArgs(fn, type)` | `varargs` member | signature method |
 | `dc::GetBindData(input)`, `dc::GetBindInfoInput` | get-bind-info callback receives bind data directly | callback receives an input wrapper with `bind_data`; the fallback accepts only the callback input type |
 | `dc::MakeTableBindInfo(table)`, `dc::SetTableEntryGetter(fn, callback)` | `BindInfo(table)`; `get_table_entry` is a no-op | `BindInfo(ScanType::TABLE)` drops the table; `get_table_entry` identifies it, so register both callbacks together |
+| `dc::NameArguments(fn, {"state", "model"})` | no-op: a `name := value` argument of a scalar function binds by position | turns the positional-only `colN` parameters into named standard ones, so `f(x, model := 'm')` binds again |
+| `dc::NameArgumentsFromDescriptions(info)` | no-op | `NameArguments` on every overload from `info.descriptions` |
 | `dc::NameFunctionsFromDescriptions(info)` | names every mutable overload by position when descriptions are present | names every signature overload by position; an empty description list is allowed, but a nonempty count mismatch throws |
 | `dc::ResultValue(result, col, row)` | `result.GetValue` | `result.Collection().GetValue` |
 | `dc::ResultTypes(result)` | public `types` | `GetTypes()` |

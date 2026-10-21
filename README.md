@@ -61,6 +61,9 @@ submodules when it builds.
 | `dc::EntryName(name)` | the string itself: **`EntryLookupInfo` keeps a reference to it**, so never pass a temporary | `QualifiedName(Identifier(name))` by value |
 | `dc::GetEntry<T>(catalog, ctx, schema, name, if_not_found)`, `dc::GetEntryInSchema(catalog, ctx, schema, lookup, if_not_found)` | `catalog.GetEntry(...)` | the same instance lookups, deprecated on 2.0 (whose replacement is static and resolves the catalog by name); the deprecation is silenced in one place |
 | `dc::ParseStatements(ctx, sql)` | `Parser().ParseQuery(sql)` | `Parser(ctx)`: `ParserOptions()` is private |
+| `dc::TryGetContextSetting(ctx, key, value)` | string setting key | explicit `Identifier` setting key |
+| `dc::ParseBuiltin(sql)` (`duckdb_compat/sql_ast.hpp`) | default parser | `Parser::GetBuiltinParser()` |
+| `dc::AstTarget`, `dc::DmlNode`, `dc::CteQuery`, `dc::Subquery`, `dc::ColumnNames`, `dc::FunctionName`, `dc::ForEachSetChild` (`duckdb_compat/sql_ast.hpp`) | public parser fields and direct DML statement fields | qualified names, accessors, and DML query nodes |
 | `dc::ReferenceValue(vec, value, n)`, `dc::MakeValueVector(value, n)` | `vec.Reference(value)`, `Vector(value)` | vectors carry their size: `Reference(value, count_t(n))`, `Vector(value, count_t(n))` |
 | `dc::SetVectorSize(vec, n)` | no-op | `FlatVector::SetSize`: a vector filled with `SetValue` or through its data keeps size 0 otherwise. For chunks use `chunk.SetChildCardinality(n)` (1.5.6 has it too) |
 | `dc::FlatData<T>(vec)` | `FlatVector::GetData<T>` | `FlatVector::GetDataMutable<T>` (`GetData` is const) |

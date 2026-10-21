@@ -31,6 +31,7 @@
 #include "duckdb_compat.hpp"
 #include "duckdb_compat/filter.hpp"
 #include "duckdb_compat/sql_ast.hpp"
+#include "duckdb_compat/aggregate.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tableref/showref.hpp"
 #include "duckdb/parser/statement/insert_statement.hpp"
@@ -375,6 +376,38 @@ void ProbeVectorsAndExpressions(BoundReferenceExpression &ref, BoundConjunctionE
 	(void)child_count;
 	const Value &value = duckdb_compat::ConstantValue(constant);
 	(void)value;
+}
+
+namespace aggregate_probe {
+struct ProbeState {
+	double sum;
+};
+void ProbeInit(data_ptr_t state) {
+	new (state) ProbeState {0.0};
+}
+void ProbeUpdate(Vector[], AggregateInputData &, idx_t, Vector &, idx_t) {
+}
+void ProbeCombine(Vector &, Vector &, AggregateInputData &, idx_t) {
+}
+void ProbeFinalize(Vector &, AggregateInputData &, Vector &, idx_t, idx_t) {
+}
+unique_ptr<FunctionData> ProbeBind(ClientContext &, duckdb_compat::AggregateBindFunction &function,
+                                   vector<unique_ptr<Expression>> &arguments) {
+	duckdb_compat::SetReturnType(function, duckdb_compat::ReturnType(*arguments[0]));
+	return nullptr;
+}
+} // namespace aggregate_probe
+
+void ProbeAggregateCallbacks() {
+	using namespace aggregate_probe;
+	AggregateFunction fn(duckdb_compat::FunctionName(std::string("probe")), {LogicalType::DOUBLE}, LogicalType::DOUBLE,
+	                     duckdb_compat::AggregateStateSize<sizeof(ProbeState)>(),
+	                     duckdb_compat::AggregateInit<ProbeInit>(), ProbeUpdate, ProbeCombine,
+	                     duckdb_compat::AggregateFinalize<ProbeFinalize>(), nullptr,
+	                     duckdb_compat::AggregateBind<ProbeBind>(), nullptr);
+	(void)fn;
+	auto expressions = duckdb_compat::ParseExpressionListBuiltin("1 + 1");
+	(void)expressions;
 }
 
 } // namespace duckdb

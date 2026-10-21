@@ -176,6 +176,12 @@ inline duckdb::SettingLookupResult TryGetSetting(duckdb::optional_ptr<duckdb::Fi
 	return detail::TryGetSetting(opener, key, value, 0);
 }
 
+//! A memory size ('4GB', '80%', ...) in bytes, with the maximum idx_t for
+//! "unlimited" -- DBConfig::ParseMemoryLimit's contract before 2.0.
+inline duckdb::idx_t MemoryLimitBytes(const std::string &arg) {
+	return detail::MemoryLimitBytes<duckdb::DBConfig>(arg, 0);
+}
+
 namespace detail {
 template <class C> auto TryGetContextSetting(C &context, const std::string &key, duckdb::Value &value, int)
     -> decltype(context.TryGetCurrentSetting(IdentifierType(key), value)) {

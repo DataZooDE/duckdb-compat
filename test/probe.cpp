@@ -353,3 +353,10 @@ void ProbeVectorsAndExpressions(BoundReferenceExpression &ref, BoundConjunctionE
 }
 
 } // namespace duckdb
+
+// DBConfig::ParseMemoryLimit returns idx_t (max = unlimited) before 2.0 and
+// optional_idx (empty = unlimited) in 2.0.
+void ProbeMemoryLimit() {
+	idx_t bytes = duckdb_compat::MemoryLimitBytes("4GB");
+	(void)bytes;
+}

@@ -62,6 +62,7 @@ submodules when it builds.
 | `dc::GetEntry<T>(catalog, ctx, schema, name, if_not_found)`, `dc::GetEntryInSchema(catalog, ctx, schema, lookup, if_not_found)` | `catalog.GetEntry(...)` | the same instance lookups, deprecated on 2.0 (whose replacement is static and resolves the catalog by name); the deprecation is silenced in one place |
 | `dc::ParseStatements(ctx, sql)` | `Parser().ParseQuery(sql)` | `Parser(ctx)`: `ParserOptions()` is private |
 | `dc::TryGetContextSetting(ctx, key, value)` | string setting key | explicit `Identifier` setting key |
+| `dc::MemoryLimitBytes(arg)` | `DBConfig::ParseMemoryLimit` (idx_t, max = unlimited) | `DBConfig::ParseMemoryLimitOrMaximum` (`ParseMemoryLimit` returns `optional_idx`) |
 | `dc::ParseBuiltin(sql)` (`duckdb_compat/sql_ast.hpp`) | default parser | `Parser::GetBuiltinParser()` |
 | `dc::AstTarget`, `dc::DmlNode`, `dc::CteQuery`, `dc::Subquery`, `dc::ColumnNames`, `dc::FunctionName`, `dc::ForEachSetChild` (`duckdb_compat/sql_ast.hpp`) | public parser fields and direct DML statement fields | qualified names, accessors, and DML query nodes |
 | `dc::ReferenceValue(vec, value, n)`, `dc::MakeValueVector(value, n)` | `vec.Reference(value)`, `Vector(value)` | vectors carry their size: `Reference(value, count_t(n))`, `Vector(value, count_t(n))` |

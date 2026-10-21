@@ -14,6 +14,18 @@
 
 namespace duckdb_compat {
 namespace detail {
+// DBConfig::ParseMemoryLimit: idx_t with the maximum for "unlimited" before 2.0;
+// 2.0 returns optional_idx (empty = unlimited) and adds ParseMemoryLimitOrMaximum,
+// which keeps the old contract. Both arms return the old contract.
+template <class C>
+auto MemoryLimitBytes(const std::string &arg, int) -> decltype(C::ParseMemoryLimitOrMaximum(arg)) {
+	return C::ParseMemoryLimitOrMaximum(arg);
+}
+template <class C>
+auto MemoryLimitBytes(const std::string &arg, long) -> decltype(C::ParseMemoryLimit(arg)) {
+	return C::ParseMemoryLimit(arg);
+}
+
 
 // Legacy table-filter kind names appeared in DuckDB 2.0.
 template <class E, class = void>

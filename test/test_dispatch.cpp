@@ -6,6 +6,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdio>
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -234,6 +235,20 @@ static_assert(dc::detail::BloomKind<NewKinds>(0) == NewKinds::LEGACY_BLOOM_FILTE
 static_assert(dc::detail::BloomKind<BothKinds>(0) == BothKinds::LEGACY_BLOOM_FILTER);
 static_assert(!dc::detail::BloomKind<NoBloom>(0).has_value());
 
+struct OldConfig {
+	static unsigned long long ParseMemoryLimit(const std::string &) {
+		return 7;
+	}
+};
+struct NewConfig {
+	static std::optional<unsigned long long> ParseMemoryLimit(const std::string &) {
+		return std::nullopt;
+	}
+	static unsigned long long ParseMemoryLimitOrMaximum(const std::string &) {
+		return 9;
+	}
+};
+
 int main() {
 	OldFn o;
 	dc::SetStability(o, Stab::B);
@@ -305,6 +320,9 @@ int main() {
 	assert(dc::detail::ResultValue(old_result, 2, 3, 0) == 5);
 	assert(dc::detail::ResultValue(new_result, 2, 3, 0) == 23);
 	assert(dc::detail::ResultValue(both_result, 2, 3, 0) == 23);
+
+	assert(dc::detail::MemoryLimitBytes<OldConfig>("4GB", 0) == 7);
+	assert(dc::detail::MemoryLimitBytes<NewConfig>("4GB", 0) == 9);
 
 	std::puts("dispatch: all passed");
 	return 0;

@@ -25,15 +25,18 @@
 #include "duckdb/parser/parsed_data/create_table_function_info.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
 #include "duckdb/parser/parsed_data/drop_info.hpp"
+#include "duckdb/parser/parsed_data/alter_info.hpp"
 #include "duckdb/storage/storage_extension.hpp"
 #include "duckdb/main/config.hpp"
 #include "duckdb_compat.hpp"
 #include "duckdb_compat/filter.hpp"
 #include "duckdb_compat/sql_ast.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
+#include "duckdb/parser/tableref/showref.hpp"
 #include "duckdb/parser/statement/insert_statement.hpp"
 #include "duckdb/parser/statement/update_statement.hpp"
 #include "duckdb/parser/statement/delete_statement.hpp"
+#include "duckdb/parser/statement/merge_into_statement.hpp"
 #include "duckdb/parser/parsed_data/copy_info.hpp"
 #include "duckdb/parser/expression/columnref_expression.hpp"
 #include "duckdb/parser/expression/subquery_expression.hpp"
@@ -113,6 +116,10 @@ static duckdb::BindInfo ProbeBindInfo(ProbeGetBindInfoInput input, duckdb::Table
 static void ProbeParsedConstant(const duckdb::Value &value) {
 	auto expression = duckdb_compat::ParsedConstant(value);
 	(void)expression;
+}
+static void ProbeSchemaOptions(const duckdb::CreateSchemaInfo &schema) {
+	(void)duckdb_compat::SchemaTarget(schema);
+	duckdb_compat::VisitCreateSchemaOptions(schema, [](const auto &options) { (void)options; });
 }
 
 namespace duckdb {
@@ -266,27 +273,43 @@ void ProbeCatalogNames(ClientContext &ctx, Catalog &catalog, const ColumnList &c
 	(void)duckdb_compat::TryGetContextSetting(ctx, schema, setting);
 }
 
-void ProbeSqlAst(const BaseTableRef &base, const InsertStatement &insert, const UpdateStatement &update,
-                 const DeleteStatement &deletion, const CopyInfo &copy, const CommonTableExpressionInfo &cte,
+void ProbeSqlAst(const BaseTableRef &base, const ShowRef &show, const DropInfo &drop, const AlterInfo &alter,
+                 const InsertStatement &insert, const UpdateStatement &update,
+                 const DeleteStatement &deletion, const MergeIntoStatement &merge, const CopyInfo &copy, const CommonTableExpressionInfo &cte,
                  const SubqueryExpression &subquery, const ColumnRefExpression &column,
-                 const FunctionExpression &function, const SetOperationNode &set) {
+                 const FunctionExpression &function, const SetOperationNode &set,
+                 const CreateTableInfo &table_info, const CreateViewInfo &view_info,
+                 const ResultModifier &modifier) {
 	(void)duckdb_compat::ParseBuiltin("SELECT 1");
 	(void)duckdb_compat::AstTarget(base);
+	(void)duckdb_compat::AstTarget(show);
+	(void)duckdb_compat::CreateTarget(drop);
+	(void)duckdb_compat::CreateTarget(alter);
 	(void)duckdb_compat::AstTarget(duckdb_compat::DmlNode(insert));
 	(void)duckdb_compat::DmlNode(update).table;
 	(void)duckdb_compat::DmlNode(deletion).table;
+	(void)duckdb_compat::MergeNode(merge).target;
 	(void)duckdb_compat::AstTarget(copy);
 	(void)duckdb_compat::CteQuery(cte);
 	(void)duckdb_compat::Subquery(subquery);
 	(void)duckdb_compat::ColumnNames(column);
 	(void)duckdb_compat::FunctionName(function);
 	duckdb_compat::ForEachSetChild(set, [](const QueryNode &) {});
+	(void)duckdb_compat::CreateTarget(table_info);
+	duckdb_compat::VisitCreateTableExtras(table_info, [](const auto &partitions, const auto &sorts, const auto &options) {
+		(void)partitions; (void)sorts; (void)options;
+	});
+	(void)duckdb_compat::CreateTarget(view_info);
+	duckdb_compat::VisitLegacyLimitPercent(modifier, [](const auto &limit) { (void)limit.offset; });
+	duckdb_compat::VisitDmlQuery(set, [](const auto &) {}, [](const auto &) {}, [](const auto &) {},
+	                             [](const auto &) {}, [](const auto &) {});
 }
 
 // Fake shapes exercise both dispatch arms even when compiling against just one
 // real DuckDB line. These are syntax probes, so the functions need no runtime.
 namespace sql_ast_fake {
 struct OldTarget { string catalog, schema, table; };
+struct OldViewTarget { string catalog, schema, view_name; };
 struct OldDml { int table; };
 struct NewDml { unique_ptr<OldDml> node; };
 struct FakeSelect { unique_ptr<int> node; };
@@ -316,6 +339,8 @@ void Probe(const OldTarget &target, const OldDml &old_dml, const NewDml &new_dml
            const OldFunction &old_function, const NewFunction &new_function,
            const OldSet &old_set, const NewSet &new_set) {
 	(void)duckdb_compat::AstTarget(target);
+	(void)duckdb_compat::CreateTarget(target);
+	(void)duckdb_compat::CreateTarget(OldViewTarget {});
 	(void)duckdb_compat::DmlNode(old_dml).table;
 	(void)duckdb_compat::DmlNode(new_dml).table;
 	(void)duckdb_compat::CteQuery(old_cte);

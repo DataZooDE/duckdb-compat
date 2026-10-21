@@ -2,9 +2,9 @@
 
 #include "duckdb_compat.hpp"
 #include "duckdb/parser/statement/select_statement.hpp"
-#if defined(DUCKDB_COMPAT_UPDATE_QUERY_NODE_HEADER)
-#include "duckdb/parser/query_node/update_query_node.hpp"
-#endif
+// list.hpp exists on every line; on 2.0 it also brings in UpdateQueryNode (UPDATE
+// became a query node there), so no consumer-side feature macro is needed.
+#include "duckdb/parser/query_node/list.hpp"
 #include <array>
 #include <utility>
 

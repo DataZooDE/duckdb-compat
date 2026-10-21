@@ -64,7 +64,14 @@ submodules when it builds.
 | `dc::TryGetContextSetting(ctx, key, value)` | string setting key | explicit `Identifier` setting key |
 | `dc::MemoryLimitBytes(arg)` | `DBConfig::ParseMemoryLimit` (idx_t, max = unlimited) | `DBConfig::ParseMemoryLimitOrMaximum` (`ParseMemoryLimit` returns `optional_idx`) |
 | `dc::ParseBuiltin(sql)` (`duckdb_compat/sql_ast.hpp`) | default parser | `Parser::GetBuiltinParser()` |
-| `dc::AstTarget`, `dc::DmlNode`, `dc::CteQuery`, `dc::Subquery`, `dc::ColumnNames`, `dc::FunctionName`, `dc::ForEachSetChild` (`duckdb_compat/sql_ast.hpp`) | public parser fields and direct DML statement fields | qualified names, accessors, and DML query nodes |
+| `dc::AstTarget`, `dc::DmlNode`, `dc::MergeNode`, `dc::CteQuery`, `dc::Subquery`, `dc::ColumnNames`, `dc::FunctionName`, `dc::ForEachSetChild` (`duckdb_compat/sql_ast.hpp`) | public parser fields and direct DML statement fields | qualified names, accessors, and DML query nodes |
+| `dc::VisitDmlQuery` (`duckdb_compat/sql_ast.hpp`) | returns false (no DML query nodes) | dispatches UPDATE, DELETE, INSERT, MERGE and COPY query nodes to callbacks |
+| `dc::CreateTarget`, `dc::VisitLegacyLimitPercent` (`duckdb_compat/sql_ast.hpp`) | reads CREATE catalog/schema plus the local name and the legacy percent-limit modifier | reads CREATE's qualified name and the renamed legacy percent-limit modifier |
+
+`VisitDmlQuery` is enabled by `DUCKDB_COMPAT_DML_QUERY_NODES`, set only when
+the pinned DuckDB source tree has `update_query_node.hpp`. This avoids a
+system-installed header changing the detected parser shape. Standalone 2.0
+probes pass the same definition explicitly.
 | `dc::ReferenceValue(vec, value, n)`, `dc::MakeValueVector(value, n)` | `vec.Reference(value)`, `Vector(value)` | vectors carry their size: `Reference(value, count_t(n))`, `Vector(value, count_t(n))` |
 | `dc::SetVectorSize(vec, n)` | no-op | `FlatVector::SetSize`: a vector filled with `SetValue` or through its data keeps size 0 otherwise. For chunks use `chunk.SetChildCardinality(n)` (1.5.6 has it too) |
 | `dc::FlatData<T>(vec)` | `FlatVector::GetData<T>` | `FlatVector::GetDataMutable<T>` (`GetData` is const) |

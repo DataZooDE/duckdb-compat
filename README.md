@@ -77,6 +77,10 @@ submodules when it builds.
 | `dc::NameArguments(fn, {"state", "model"})` | no-op: a `name := value` argument of a scalar function binds by position | turns the positional-only `colN` parameters into named standard ones, so `f(x, model := 'm')` binds again |
 | `dc::NameArgumentsFromDescriptions(info)` | no-op | `NameArguments` on every overload from `info.descriptions` |
 | `dc::NameFunctionsFromDescriptions(info)` | names every mutable overload by position when descriptions are present | names every signature overload by position; an empty description list is allowed, but a nonempty count mismatch throws |
+| `dc::AggregateStateSize<N>()`, `dc::AggregateInit<Init>()`, `dc::AggregateFinalize<Finalize>()`, `dc::AggregateBind<Bind>()` (`duckdb_compat/aggregate.hpp`) | the callbacks themselves: size/init take the `AggregateFunction`, init one state at a time, finalize `AggregateInputData &`, bind `(ClientContext &, AggregateFunction &, arguments)` | adapters to `AggregateStateInput &`, batched init, `AggregateFinalizeInputData &` and a single `BindAggregateFunctionInput &`. Write `Init(data_ptr_t)`, `Finalize(Vector &, AggregateInputData &, Vector &, idx_t, idx_t)` and `Bind(ClientContext &, dc::AggregateBindFunction &, arguments)` once |
+| `dc::SetReturnType(function, type)` | `function.return_type = type` (1.4), the setter (1.5) | `SetReturnType`; in an aggregate bind `function` is the `BoundAggregateFunction` |
+| `dc::ReturnType(expr)` | public `Expression::return_type` | `GetReturnType()` (the field is protected) |
+| `dc::ParseExpressionListBuiltin(sql)` (`duckdb_compat/sql_ast.hpp`) | static `Parser::ParseExpressionList` | `Parser::GetBuiltinParser().ParseExpressionList` |
 | `dc::ResultValue(result, col, row)` | `result.GetValue` | `result.Collection().GetValue` |
 | `dc::ResultTypes(result)` | public `types` | `GetTypes()` |
 | `dc::MutableValidity(vector)` | `FlatVector::Validity` | `FlatVector::ValidityMutable` |

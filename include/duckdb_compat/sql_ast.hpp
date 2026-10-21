@@ -26,6 +26,16 @@ auto ParseBuiltin(const std::string &sql, long) -> decltype(P().statements) {
 	return std::move(parser.statements);
 }
 
+template <class P = duckdb::Parser>
+auto ParseExpressionListBuiltin(const std::string &sql, int) -> decltype(P::GetBuiltinParser().ParseExpressionList(sql)) {
+	auto parser = P::GetBuiltinParser();
+	return parser.ParseExpressionList(sql);
+}
+template <class P = duckdb::Parser>
+auto ParseExpressionListBuiltin(const std::string &sql, long) -> decltype(P::ParseExpressionList(sql)) {
+	return P::ParseExpressionList(sql);
+}
+
 template <class T> auto AstName(const T &obj, int) -> decltype(obj.GetQualifiedName()) {
 	return obj.GetQualifiedName();
 }
@@ -68,6 +78,7 @@ template <class T, class F> auto ForEachSetChild(const T &node, F &&fn, long) ->
 } // namespace detail
 
 inline auto ParseBuiltin(const std::string &sql) { return detail::ParseBuiltin(sql, 0); }
+inline auto ParseExpressionListBuiltin(const std::string &sql) { return detail::ParseExpressionListBuiltin(sql, 0); }
 template <class T> auto AstTarget(const T &obj) { return detail::AstTarget(obj, 0); }
 template <class T> decltype(auto) DmlNode(const T &stmt) { return detail::DmlNode(stmt, 0); }
 template <class T> auto CteQuery(const T &info) { return detail::CteQuery(info, 0); }

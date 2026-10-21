@@ -1125,4 +1125,24 @@ inline void SetVectorSize(duckdb::Vector &vector, duckdb::idx_t count) {
 	detail::SetVectorSize(vector, count, 0);
 }
 
+// --- Expression result type ---------------------------------------------------------------
+// 2.0 makes Expression::return_type protected behind GetReturnType(); before
+// 2.0 it is a public member (1.5 has no getter).
+namespace detail {
+template <class E>
+auto ExpressionType(const E &expr, int) -> decltype(expr.GetReturnType()) {
+	return expr.GetReturnType();
+}
+template <class E>
+auto ExpressionType(const E &expr, long) -> decltype((expr.return_type)) {
+	return expr.return_type;
+}
+} // namespace detail
+
+//! The result type of a bound expression.
+template <class E>
+auto ReturnType(const E &expr) -> decltype(detail::ExpressionType(expr, 0)) {
+	return detail::ExpressionType(expr, 0);
+}
+
 } // namespace duckdb_compat

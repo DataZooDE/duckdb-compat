@@ -222,9 +222,14 @@ void Probe(optional_ptr<FileOpener> opener, ClientContext &ctx, const BaseSecret
 	duckdb_compat::SetFallible(sf);
 	duckdb_compat::SetNullHandling(sf, FunctionNullHandling::SPECIAL_HANDLING);
 	duckdb_compat::NameArguments(sf, {"text"});
-	ScalarFunctionSet sset("probe");
-	sset.AddFunction(sf);
+	ScalarFunctionSet sset("probe_from_description");
+	ScalarFunction described("probe_from_description", {LogicalType::VARCHAR, LogicalType::VARCHAR},
+	                         LogicalType::BIGINT, ProbeScalar);
+	sset.AddFunction(described);
 	CreateScalarFunctionInfo sinfo(sset);
+	FunctionDescription description;
+	description.parameter_names = {"text", "provider"};
+	sinfo.descriptions.push_back(std::move(description));
 	duckdb_compat::NameArgumentsFromDescriptions(sinfo);
 	(void)tf;
 }

@@ -29,7 +29,9 @@
 #include "duckdb_compat/dispatch.hpp"
 
 #include <optional>
+#include <cctype>
 #include <map>
+#include <mutex>
 #include <string>
 #include <tuple>
 #include <type_traits>
@@ -460,6 +462,132 @@ void NameParameters(FN &fn, const std::vector<std::string> &names) {
 }
 
 namespace detail {
+struct NamedScalarRegistration {
+	std::string name;
+	std::vector<std::string> types;
+	std::vector<std::string> names;
+	duckdb::bind_scalar_function_t original;
+};
+
+inline std::vector<NamedScalarRegistration> &NamedScalarRegistry() {
+	static std::vector<NamedScalarRegistration> entries;
+	return entries;
+}
+inline std::mutex &NamedScalarMutex() {
+	static std::mutex mutex;
+	return mutex;
+}
+template <class FN>
+auto GetScalarBind(FN &fn, int) -> decltype(fn.GetBindCallback()) {
+	return fn.GetBindCallback();
+}
+template <class FN>
+auto GetScalarBind(FN &fn, long) -> decltype(fn.bind) {
+	return fn.bind;
+}
+template <class FN>
+auto SetScalarBind(FN &fn, duckdb::bind_scalar_function_t callback, int)
+    -> decltype(fn.SetBindCallback(callback), void()) {
+	fn.SetBindCallback(callback);
+}
+template <class FN>
+auto SetScalarBind(FN &fn, duckdb::bind_scalar_function_t callback, long)
+    -> decltype(fn.bind = callback, void()) {
+	fn.bind = callback;
+}
+template <class FN>
+std::vector<std::string> NamedScalarTypes(const FN &fn) {
+	std::vector<std::string> result;
+	for (const auto &type : fn.arguments) {
+		result.push_back(type.ToString());
+	}
+	return result;
+}
+template <class CONTEXT, class EXPR>
+bool IsNamedScalarArgument(CONTEXT &context, const EXPR &argument, const std::string &alias) {
+	const auto location = argument.GetQueryLocation();
+	if (location.IsValid()) {
+		const auto &query = context.GetCurrentQuery();
+		auto pos = location.GetIndex();
+		if (pos <= query.size()) {
+			while (pos > 0 && std::isspace(static_cast<unsigned char>(query[pos - 1]))) {
+				pos--;
+			}
+			if (pos >= 2 && ((query[pos - 2] == ':' && query[pos - 1] == '=') ||
+			                 (query[pos - 2] == '=' && query[pos - 1] == '>'))) {
+				auto end = pos - 2;
+				while (end > 0 && std::isspace(static_cast<unsigned char>(query[end - 1]))) {
+					end--;
+				}
+				auto begin = end;
+				while (begin > 0 && (std::isalnum(static_cast<unsigned char>(query[begin - 1])) || query[begin - 1] == '_')) {
+					begin--;
+				}
+				return duckdb::StringUtil::CIEquals(query.substr(begin, end - begin), alias);
+			}
+			return false;
+		}
+	}
+	// A generated expression can lack a location in the current SQL. Bound
+	// column references receive their own column name as an implicit alias.
+	return argument.GetExpressionClass() != duckdb::ExpressionClass::BOUND_COLUMN_REF && argument.HasAlias();
+}
+template <class CONTEXT, class FN, class ARGS>
+duckdb::unique_ptr<duckdb::FunctionData> BindNamedScalar(CONTEXT &context, FN &fn, ARGS &arguments) {
+	NamedScalarRegistration registration;
+	{
+		std::lock_guard<std::mutex> lock(NamedScalarMutex());
+		const auto types = NamedScalarTypes(fn);
+		const NamedScalarRegistration *fallback = nullptr;
+		for (const auto &entry : NamedScalarRegistry()) {
+			if (entry.name != fn.name || entry.names.size() != arguments.size()) {
+				continue;
+			}
+			if (entry.types == types) {
+				fallback = &entry;
+				break;
+			}
+			if (fallback) {
+				throw duckdb::BinderException("Ambiguous named argument registration for function %s", fn.name);
+			}
+			fallback = &entry;
+		}
+		if (!fallback) {
+			throw duckdb::BinderException("Missing named argument registration for function %s", fn.name);
+		}
+		registration = *fallback;
+	}
+	ARGS ordered(arguments.size());
+	duckdb::idx_t positional = 0;
+	bool seen_named = false;
+	for (auto &argument : arguments) {
+		const auto alias = duckdb_compat::Str(argument->GetAlias());
+		if (alias.empty() || !IsNamedScalarArgument(context, *argument, alias)) {
+			if (seen_named) {
+				throw duckdb::BinderException("Function %s: positional argument after named argument", fn.name);
+			}
+			ordered[positional++] = std::move(argument);
+			continue;
+		}
+		seen_named = true;
+		duckdb::idx_t target = registration.names.size();
+		for (duckdb::idx_t i = 0; i < registration.names.size(); i++) {
+			if (duckdb::StringUtil::CIEquals(alias, registration.names[i])) {
+				target = i;
+				break;
+			}
+		}
+		if (target == registration.names.size()) {
+			throw duckdb::BinderException("Function %s: unknown parameter %s", fn.name, alias);
+		}
+		if (target < positional || ordered[target]) {
+			throw duckdb::BinderException("Function %s: duplicate or positional collision for parameter %s", fn.name, alias);
+		}
+		ordered[target] = std::move(argument);
+	}
+	arguments = std::move(ordered);
+	return registration.original ? registration.original(context, fn, arguments) : nullptr;
+}
 // 2.0: replace each positional parameter by a STANDARD one (positional or by name). The
 // parameter type is taken from the signature, so nothing names duckdb::FunctionParameter
 // directly (it does not exist before 2.0).
@@ -480,16 +608,23 @@ auto NameArguments(FN &fn, const std::vector<std::string> &names, int)
 	}
 }
 template <class FN>
-auto NameArguments(FN &fn, const std::vector<std::string> &, long) -> decltype((void)fn.name, void()) {
+auto NameArguments(FN &fn, const std::vector<std::string> &names, long)
+    -> decltype((void)fn.arguments, SetScalarBind(fn, &BindNamedScalar<duckdb::ClientContext, FN,
+                    duckdb::vector<duckdb::unique_ptr<duckdb::Expression>>>, 0), void()) {
+	std::lock_guard<std::mutex> lock(NamedScalarMutex());
+	const auto wrapper = &BindNamedScalar<duckdb::ClientContext, FN,
+	                   duckdb::vector<duckdb::unique_ptr<duckdb::Expression>>>;
+	if (GetScalarBind(fn, 0) == wrapper) {
+		return;
+	}
+	NamedScalarRegistry().push_back({fn.name, NamedScalarTypes(fn), names, GetScalarBind(fn, 0)});
+	SetScalarBind(fn, wrapper, 0);
 }
 } // namespace detail
 
-//! Name a scalar/aggregate function's positional parameters AND let callers pass them by
-//! that name, e.g. f(a, b, model := 'x'). Before 2.0 a `name := value` argument of a scalar
-//! function binds by position, so this is a no-op. On 2.0 constructor-made parameters are
-//! positional-only ("col0, /") and a named argument fails to bind; this turns them into
-//! standard parameters. Use NameParameters instead when only duckdb_functions() should show
-//! the names.
+//! Name a scalar function's positional parameters and accept them by name.
+//! On 1.x the bind callback reorders aliased arguments before DuckDB casts them;
+//! on 2.0 DuckDB's signature performs name binding itself.
 template <class FN>
 void NameArguments(FN &fn, const std::vector<std::string> &names) {
 	detail::NameArguments(fn, names, 0);

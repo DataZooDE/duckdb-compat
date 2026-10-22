@@ -1,4 +1,4 @@
-// Aggregate function callbacks across DuckDB 1.4 / 1.5 / 2.0.
+// Aggregate function callbacks across DuckDB 1.5 / 2.0.
 //
 // 2.0 changed the shape of the hand-written aggregate callbacks:
 //   size        (const AggregateFunction &)           -> (AggregateStateInput &)

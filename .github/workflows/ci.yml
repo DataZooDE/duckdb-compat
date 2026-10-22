@@ -31,10 +31,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        line: [v1.4.5 LTS, v1.5.6, v2.0 (community-extensions default)]
+        line: [v1.5.6, v2.0 (community-extensions default)]
         include:
-          - line: v1.4.5 LTS
-            ref: v1.4.5
           - line: v1.5.6
             ref: v1.5.6
           - line: v2.0 (community-extensions default)

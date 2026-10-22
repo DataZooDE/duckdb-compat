@@ -1,4 +1,4 @@
-// duckdb_compat.hpp -- one source tree for DuckDB 1.4 LTS, 1.5 and 2.0.
+// duckdb_compat.hpp -- one source tree for DuckDB 1.5 and 2.0.
 //
 // Include AFTER the DuckDB headers you use. Every helper detects the API by
 // shape (see duckdb_compat/dispatch.hpp), never by version number. The rule

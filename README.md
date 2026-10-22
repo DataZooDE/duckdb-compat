@@ -1,11 +1,11 @@
 # duckdb-compat
 
 This header-only library lets **one source tree of a DuckDB C++ extension**
-build against DuckDB **1.4 LTS (andium), 1.5 (variegata) and 2.0**.
+build against DuckDB **1.5 (variegata) and 2.0**. DuckDB 1.4.x LTS (andium)
+is no longer supported or tested.
 
-community-extensions builds `repo.ref` against DuckDB 2.0, `repo.variegata`
-against v1.5.6 and `repo.andium` against v1.4.5. With this header all three
-can point at the same commit.
+community-extensions builds `repo.ref` against DuckDB 2.0 and `repo.variegata`
+against v1.5.6. With this header both can point at the same commit.
 
 ## Use
 
@@ -30,7 +30,10 @@ submodules when it builds.
 
 ## Helpers
 
-| Helper | 1.4 / 1.5 | 2.0 |
+Cells marked "(1.4)" describe fallback overloads that are still in the code
+but no longer supported or CI-tested; they are slated for removal.
+
+| Helper | old API (1.5; 1.4 where marked) | 2.0 |
 |---|---|---|
 | `dc::Str(x)` | `x` (a `std::string`) | `x.GetIdentifierName()`: secret names and option keys are `Identifier` |
 | `dc::SetStability(fn, s)` | `fn.stability = s` (1.5 also has the setter) | `fn.SetStability(s)` |
@@ -106,7 +109,7 @@ probes pass the same definition explicitly.
 
 ### Table filters (`duckdb_compat/filter.hpp`)
 
-| Helper | 1.4 / 1.5 | 2.0 |
+| Helper | old API (1.5; 1.4 where marked) | 2.0 |
 |---|---|---|
 | `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, `dc::NEW_TABLE_FILTERS`, filter class aliases | current legacy enum and classes; Bloom is absent on 1.4 | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER`; the shape flag selects the complete alias |
 | `dc::FilterKind::STRUCT_EXTRACT` | legacy struct-extract filter kind | renamed legacy struct-extract filter kind |
@@ -137,7 +140,7 @@ Every helper detects the API **by its shape, never by version number**.
 There are two overloads: one that compiles only when the new API exists
 (SFINAE), and one for the old API. The new API wins whenever it is
 present. A version check can't express the real situation: 1.5.6 already
-ships several "2.0" APIs that 1.4.5 lacks.
+ships several "2.0" APIs as backports.
 
 Rules for adding a helper:
 
@@ -159,7 +162,7 @@ Rules for adding a helper:
   both-at-once types. It needs no DuckDB:
   `cmake -S . -B build && cmake --build build && ctest --test-dir build`.
 - `test/probe.cpp` instantiates every helper against the real headers of each
-  DuckDB line. CI runs it for 1.4.5, 1.5.6 and the 2.0 commit that
+  DuckDB line. CI runs it for 1.5.6 and the 2.0 commit that
   community-extensions builds against. Locally:
   `g++ -std=c++17 -fsyntax-only -Iinclude -I<duckdb>/src/include test/probe.cpp`.
 - The table-filter probe uses the same include order:

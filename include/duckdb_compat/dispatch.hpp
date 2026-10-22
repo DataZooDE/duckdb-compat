@@ -5,7 +5,8 @@
 // `(..., long)` uses the OLD one. Calls pass `0`, so the new API wins whenever
 // the type has it -- including on DuckDB 1.5.6, which carries both. Detection
 // is by API shape, not version number: 1.5.6 already has several "2.0" APIs
-// that 1.4.5 LTS lacks, so a version check cannot express the truth.
+// as backports, so a version check cannot express the truth. (Some `long`
+// overloads exist only for DuckDB 1.4, which is no longer supported.)
 #pragma once
 
 #include <optional>

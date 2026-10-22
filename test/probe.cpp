@@ -32,6 +32,7 @@
 #include "duckdb_compat/filter.hpp"
 #include "duckdb_compat/sql_ast.hpp"
 #include "duckdb_compat/list_vector.hpp"
+#include "duckdb_compat/struct_vector.hpp"
 #include "duckdb_compat/aggregate.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tableref/showref.hpp"
@@ -425,4 +426,16 @@ void ProbeMemoryLimit() {
 void ProbeListVector(duckdb::Vector &list) {
 	(void)duckdb::ListVector::GetListSize(list);
 	(void)duckdb::ListVector::GetEntry(list);
+}
+
+// Struct children are unique_ptr<Vector> before 2.0 and Vector values in 2.0.0;
+// StructChild yields the child Vector on every line, mutable or const as the entries are.
+void ProbeStructChild(duckdb::Vector &result, const duckdb::Vector &input) {
+	auto &children = duckdb::StructVector::GetEntries(result);
+	duckdb::Vector &child = duckdb_compat::StructChild(children[0]);
+	(void)child;
+	for (auto &entry : duckdb::StructVector::GetEntries(input)) {
+		const duckdb::Vector &c = duckdb_compat::StructChild(entry);
+		(void)c;
+	}
 }

@@ -31,6 +31,7 @@
 #include "duckdb_compat.hpp"
 #include "duckdb_compat/filter.hpp"
 #include "duckdb_compat/sql_ast.hpp"
+#include "duckdb_compat/list_vector.hpp"
 #include "duckdb_compat/aggregate.hpp"
 #include "duckdb/parser/tableref/basetableref.hpp"
 #include "duckdb/parser/tableref/showref.hpp"
@@ -417,4 +418,11 @@ void ProbeAggregateCallbacks() {
 void ProbeMemoryLimit() {
 	idx_t bytes = duckdb_compat::MemoryLimitBytes("4GB");
 	(void)bytes;
+}
+
+// ListVector moved to its own header in 2.0.0; duckdb_compat/list_vector.hpp makes it
+// available on every line.
+void ProbeListVector(duckdb::Vector &list) {
+	(void)duckdb::ListVector::GetListSize(list);
+	(void)duckdb::ListVector::GetEntry(list);
 }

@@ -64,6 +64,7 @@ submodules when it builds.
 | `dc::TryGetContextSetting(ctx, key, value)` | string setting key | explicit `Identifier` setting key |
 | `dc::MemoryLimitBytes(arg)` | `DBConfig::ParseMemoryLimit` (idx_t, max = unlimited) | `DBConfig::ParseMemoryLimitOrMaximum` (`ParseMemoryLimit` returns `optional_idx`) |
 | `#include "duckdb_compat/list_vector.hpp"` | `ListVector` declared in the vector header | `ListVector` in `duckdb/common/vector/list_vector.hpp` (no longer pulled in by `duckdb.hpp`) |
+| `dc::StructChild(StructVector::GetEntries(v)[i])` (`duckdb_compat/struct_vector.hpp`) | children are `unique_ptr<Vector>`, `StructVector` in the vector header | children are `Vector` values, `StructVector` in `duckdb/common/vector/struct_vector.hpp` |
 | `dc::ParseBuiltin(sql)` (`duckdb_compat/sql_ast.hpp`) | default parser | `Parser::GetBuiltinParser()` |
 | `dc::AstTarget`, `dc::DmlNode`, `dc::MergeNode`, `dc::CteQuery`, `dc::Subquery`, `dc::ColumnNames`, `dc::FunctionName`, `dc::ForEachSetChild` (`duckdb_compat/sql_ast.hpp`) | public parser fields and direct DML statement fields | qualified names, accessors, and DML query nodes |
 | `dc::VisitDmlQuery` (`duckdb_compat/sql_ast.hpp`) | returns false (no DML query nodes) | dispatches UPDATE, DELETE, INSERT, MERGE and COPY query nodes to callbacks |

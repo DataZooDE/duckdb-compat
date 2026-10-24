@@ -142,13 +142,9 @@ template <class F>
 auto SetReturnType(F &function, duckdb::LogicalType type, int) -> decltype(function.SetReturnType(type), void()) {
 	function.SetReturnType(std::move(type));
 }
-template <class F>
-auto SetReturnType(F &function, duckdb::LogicalType type, long) -> decltype(function.return_type = type, void()) {
-	function.return_type = std::move(type);
-}
 } // namespace detail
 
-//! Set a function's result type from its bind (`return_type` member before 1.5, setter after).
+//! Set a function's result type from its bind (the SetReturnType setter on 1.5 and 2.0).
 template <class F>
 void SetReturnType(F &function, duckdb::LogicalType type) {
 	detail::SetReturnType(function, std::move(type), 0);

@@ -14,9 +14,6 @@ namespace dc = duckdb_compat;
 
 enum class Stab { A, B };
 
-struct OldFn {
-	Stab stability = Stab::A;
-};
 struct NewFn {
 	Stab s = Stab::A;
 	bool used_setter = false;
@@ -35,11 +32,7 @@ struct BothFn {
 	}
 };
 
-enum class Errs { CANNOT_ERROR, CAN_THROW_RUNTIME_ERROR };
-// 1.4: a public `errors` field; 1.5 and 2.0: SetFallible().
-struct OldErrFn {
-	Errs errors = Errs::CANNOT_ERROR;
-};
+// 1.5 and 2.0: SetFallible().
 struct NewErrFn {
 	bool fallible = false;
 	void SetFallible() {
@@ -48,10 +41,7 @@ struct NewErrFn {
 };
 
 enum class Nulls { DEFAULT_NULL_HANDLING, SPECIAL_HANDLING };
-// 1.4: a public `null_handling` field; 1.5 and 2.0: SetNullHandling().
-struct OldNullFn {
-	Nulls null_handling = Nulls::DEFAULT_NULL_HANDLING;
-};
+// 1.5 and 2.0: SetNullHandling().
 struct NewNullFn {
 	Nulls n = Nulls::DEFAULT_NULL_HANDLING;
 	void SetNullHandling(Nulls v) {
@@ -96,13 +86,9 @@ struct NewClient {
 	}
 };
 
-// 1.4: only SetCardinality. 1.5.6: both (SetChildCardinality is a backport
-// alias). 2.0: both, but SetCardinality leaves the vectors' own size alone --
-// the helper must prefer SetChildCardinality whenever it exists.
-struct OldChunk {
-	unsigned long count = 0;
-	void SetCardinality(unsigned long n) { count = n; }
-};
+// 1.5.6: both (SetChildCardinality is a backport alias). 2.0: both, but
+// SetCardinality leaves the vectors' own size alone -- the helper must use
+// SetChildCardinality.
 struct NewChunk {
 	unsigned long count = 0, child = 0;
 	void SetCardinality(unsigned long n) { count = n; }
@@ -204,7 +190,6 @@ enum class BothKinds {
 	LEGACY_IN_FILTER,
 	LEGACY_BLOOM_FILTER
 };
-enum class NoBloom { CONSTANT_COMPARISON };
 
 static_assert(dc::detail::ConstantKind<OldKinds>(0) == OldKinds::CONSTANT_COMPARISON);
 static_assert(dc::detail::ConstantKind<NewKinds>(0) == NewKinds::LEGACY_CONSTANT_COMPARISON);
@@ -233,7 +218,6 @@ static_assert(dc::detail::InKind<BothKinds>(0) == BothKinds::LEGACY_IN_FILTER);
 static_assert(dc::detail::BloomKind<OldKinds>(0) == OldKinds::BLOOM_FILTER);
 static_assert(dc::detail::BloomKind<NewKinds>(0) == NewKinds::LEGACY_BLOOM_FILTER);
 static_assert(dc::detail::BloomKind<BothKinds>(0) == BothKinds::LEGACY_BLOOM_FILTER);
-static_assert(!dc::detail::BloomKind<NoBloom>(0).has_value());
 
 struct OldConfig {
 	static unsigned long long ParseMemoryLimit(const std::string &) {
@@ -250,9 +234,6 @@ struct NewConfig {
 };
 
 int main() {
-	OldFn o;
-	dc::SetStability(o, Stab::B);
-	assert(o.stability == Stab::B);
 	NewFn n;
 	dc::SetStability(n, Stab::B);
 	assert(n.s == Stab::B && n.used_setter);
@@ -260,23 +241,14 @@ int main() {
 	dc::SetStability(b, Stab::B);
 	assert(b.used_setter);
 
-	OldErrFn oe;
-	dc::SetFallible(oe);
-	assert(oe.errors == Errs::CAN_THROW_RUNTIME_ERROR);
 	NewErrFn ne;
 	dc::SetFallible(ne);
 	assert(ne.fallible);
 
-	OldNullFn on;
-	dc::SetNullHandling(on, Nulls::SPECIAL_HANDLING);
-	assert(on.null_handling == Nulls::SPECIAL_HANDLING);
 	NewNullFn nn;
 	dc::SetNullHandling(nn, Nulls::SPECIAL_HANDLING);
 	assert(nn.n == Nulls::SPECIAL_HANDLING);
 
-	OldChunk och;
-	dc::SetChildCardinality(och, 7);
-	assert(och.count == 7);
 	NewChunk nch;
 	dc::SetChildCardinality(nch, 7);
 	assert(nch.count == 7 && nch.child == 7);

@@ -30,15 +30,12 @@ submodules when it builds.
 
 ## Helpers
 
-Cells marked "(1.4)" describe fallback overloads that are still in the code
-but no longer supported or CI-tested; they are slated for removal.
-
-| Helper | old API (1.5; 1.4 where marked) | 2.0 |
+| Helper | old API (1.5) | 2.0 |
 |---|---|---|
 | `dc::Str(x)` | `x` (a `std::string`) | `x.GetIdentifierName()`: secret names and option keys are `Identifier` |
-| `dc::SetStability(fn, s)` | `fn.stability = s` (1.5 also has the setter) | `fn.SetStability(s)` |
-| `dc::SetFallible(fn)` | `fn.errors = CAN_THROW_RUNTIME_ERROR` (1.4), `fn.SetFallible()` (1.5) | `fn.SetFallible()`. **Required** for any scalar function that can throw: 2.0 turns its error into an INTERNAL error |
-| `dc::SetNullHandling(fn, h)` | `fn.null_handling = h` (1.4), `fn.SetNullHandling(h)` (1.5) | `fn.SetNullHandling(h)`; scalar and aggregate functions |
+| `dc::SetStability(fn, s)` | `fn.SetStability(s)` | `fn.SetStability(s)` |
+| `dc::SetFallible(fn)` | `fn.SetFallible()` | `fn.SetFallible()`. **Required** for any scalar function that can throw: 2.0 turns its error into an INTERNAL error |
+| `dc::SetNullHandling(fn, h)` | `fn.SetNullHandling(h)` | `fn.SetNullHandling(h)`; scalar and aggregate functions |
 | `dc::IsInterrupted(ctx)` | `ctx.interrupted` | `ctx.IsInterrupted()` |
 | `dc::TryGetSetting(opener, key, v)` | `FileOpener::TryGetCurrentSetting(opener, key, v)` | same, with `Identifier(key)` |
 | `dc::BindNames` | `vector<string>` | `vector<Identifier>`; fill it with `emplace_back` |
@@ -58,8 +55,8 @@ but no longer supported or CI-tested; they are slated for removal.
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 | `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |
-| `dc::Ident(s)`, `dc::Str(x)`, `dc::Strs(names)`, `dc::Idents(names)` | `std::string` (1.4); 1.5.6 has an `Identifier` that converts implicitly | catalog names are `Identifier`, explicit from and to `std::string`. `Ident` into catalog APIs (`GetCatalogEntry`, `GetSchema`, `ColumnList::GetColumn`, `ColumnDefinition`, ...), `Str` out of them. 2.0 formats an `Identifier` exception argument with quotes: pass `Str(...)` |
-| `dc::SetQualifiedName(info, catalog, schema, name)`, `dc::SetSchema(info, s)`, `dc::SetCatalog(info, c)` | `info.catalog`/`info.schema`/`info.table` (1.4); 1.5.6 also has the 2.0 setters | one private `QualifiedName` behind `SetQualifiedName` / `SetSchema` / `SetCatalog`. Works for `CreateTableInfo`, `CreateViewInfo`, `CreateSequenceInfo`, `CreateSchemaInfo` and `DropInfo` |
+| `dc::Ident(s)`, `dc::Str(x)`, `dc::Strs(names)`, `dc::Idents(names)` | `std::string`; 1.5.6 also has an `Identifier` that converts implicitly | catalog names are `Identifier`, explicit from and to `std::string`. `Ident` into catalog APIs (`GetCatalogEntry`, `GetSchema`, `ColumnList::GetColumn`, `ColumnDefinition`, ...), `Str` out of them. 2.0 formats an `Identifier` exception argument with quotes: pass `Str(...)` |
+| `dc::SetQualifiedName(info, catalog, schema, name)`, `dc::SetSchema(info, s)`, `dc::SetCatalog(info, c)` | the 2.0 setters; `DropInfo` has only `SetQualifiedName`, so its schema and catalog are set through the `schema`/`catalog` fields | one private `QualifiedName` behind `SetQualifiedName` / `SetSchema` / `SetCatalog`. Works for `CreateTableInfo`, `CreateViewInfo`, `CreateSequenceInfo`, `CreateSchemaInfo` and `DropInfo` |
 | `dc::MakeUniqueConstraint({"a", "b"}, is_pk)` | `UniqueConstraint(vector<string>, bool)` | `UniqueConstraint(vector<Identifier>, bool)` |
 | `dc::EntryName(name)` | the string itself: **`EntryLookupInfo` keeps a reference to it**, so never pass a temporary | `QualifiedName(Identifier(name))` by value |
 | `dc::GetEntry<T>(catalog, ctx, schema, name, if_not_found)`, `dc::GetEntryInSchema(catalog, ctx, schema, lookup, if_not_found)` | `catalog.GetEntry(...)` | the same instance lookups, deprecated on 2.0 (whose replacement is static and resolves the catalog by name); the deprecation is silenced in one place |
@@ -91,7 +88,7 @@ probes pass the same definition explicitly.
 | `dc::NameArgumentsFromDescriptions(info)` | no-op | `NameArguments` on every overload from `info.descriptions` |
 | `dc::NameFunctionsFromDescriptions(info)` | names every mutable overload by position when descriptions are present | names every signature overload by position; an empty description list is allowed, but a nonempty count mismatch throws |
 | `dc::AggregateStateSize<N>()`, `dc::AggregateInit<Init>()`, `dc::AggregateFinalize<Finalize>()`, `dc::AggregateBind<Bind>()` (`duckdb_compat/aggregate.hpp`) | the callbacks themselves: size/init take the `AggregateFunction`, init one state at a time, finalize `AggregateInputData &`, bind `(ClientContext &, AggregateFunction &, arguments)` | adapters to `AggregateStateInput &`, batched init, `AggregateFinalizeInputData &` and a single `BindAggregateFunctionInput &`. Write `Init(data_ptr_t)`, `Finalize(Vector &, AggregateInputData &, Vector &, idx_t, idx_t)` and `Bind(ClientContext &, dc::AggregateBindFunction &, arguments)` once |
-| `dc::SetReturnType(function, type)` | `function.return_type = type` (1.4), the setter (1.5) | `SetReturnType`; in an aggregate bind `function` is the `BoundAggregateFunction` |
+| `dc::SetReturnType(function, type)` | the `SetReturnType` setter | `SetReturnType`; in an aggregate bind `function` is the `BoundAggregateFunction` |
 | `dc::ReturnType(expr)` | public `Expression::return_type` | `GetReturnType()` (the field is protected) |
 | `dc::ParseExpressionListBuiltin(sql)` (`duckdb_compat/sql_ast.hpp`) | static `Parser::ParseExpressionList` | `Parser::GetBuiltinParser().ParseExpressionList` |
 | `dc::ResultValue(result, col, row)` | `result.GetValue` | `result.Collection().GetValue` |
@@ -109,9 +106,9 @@ probes pass the same definition explicitly.
 
 ### Table filters (`duckdb_compat/filter.hpp`)
 
-| Helper | old API (1.5; 1.4 where marked) | 2.0 |
+| Helper | old API (1.5) | 2.0 |
 |---|---|---|
-| `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, `dc::NEW_TABLE_FILTERS`, filter class aliases | current legacy enum and classes; Bloom is absent on 1.4 | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER`; the shape flag selects the complete alias |
+| `dc::FilterKind`, `dc::HAS_BLOOM_FILTER`, `dc::NEW_TABLE_FILTERS`, filter class aliases | current legacy enum and classes (`HAS_BLOOM_FILTER` is true on both lines) | `LEGACY_*` enum and classes; Bloom is `LEGACY_BLOOM_FILTER`; the shape flag selects the complete alias |
 | `dc::FilterKind::STRUCT_EXTRACT` | legacy struct-extract filter kind | renamed legacy struct-extract filter kind |
 | `dc::MatchesConstantFilter(filter, value)` | calls the filter's comparison method | compares values using the legacy filter's comparison type |
 | `dc::CopyFilter(filter)` | calls the virtual copy method | copies the active expression filter |

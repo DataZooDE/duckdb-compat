@@ -5,8 +5,8 @@
 // `(..., long)` uses the OLD one. Calls pass `0`, so the new API wins whenever
 // the type has it -- including on DuckDB 1.5.6, which carries both. Detection
 // is by API shape, not version number: 1.5.6 already has several "2.0" APIs
-// as backports, so a version check cannot express the truth. (Some `long`
-// overloads exist only for DuckDB 1.4, which is no longer supported.)
+// as backports, so a version check cannot express the truth. A helper whose
+// new API exists on every supported line has only the `int` overload.
 #pragma once
 
 #include <optional>
@@ -40,10 +40,6 @@ constexpr auto BloomKind(int) -> decltype(E::LEGACY_BLOOM_FILTER, std::optional<
 template <class E>
 constexpr auto BloomKind(long) -> decltype(E::BLOOM_FILTER, std::optional<E>()) {
 	return E::BLOOM_FILTER;
-}
-template <class E>
-constexpr std::optional<E> BloomKind(...) {
-	return std::nullopt;
 }
 
 template <class E>
@@ -146,32 +142,19 @@ template <class F, class S>
 auto SetStability(F &fn, S value, int) -> decltype(fn.SetStability(value), void()) {
 	fn.SetStability(value);
 }
-template <class F, class S>
-void SetStability(F &fn, S value, long) {
-	fn.stability = value;
-}
 
 // --- Scalar function "may throw": 2.0 turns an error thrown by a function
-// NOT marked fallible into an INTERNAL error. 1.5/2.0: SetFallible(); 1.4:
-// the public `errors` field (FunctionErrors::CAN_THROW_RUNTIME_ERROR).
+// NOT marked fallible into an INTERNAL error. 1.5 and 2.0: SetFallible().
 template <class F>
 auto SetFallible(F &fn, int) -> decltype(fn.SetFallible(), void()) {
 	fn.SetFallible();
 }
-template <class F>
-void SetFallible(F &fn, long) {
-	fn.errors = decltype(fn.errors)::CAN_THROW_RUNTIME_ERROR;
-}
 
-// --- Function NULL handling: 1.4 has only the public `null_handling` field;
-// 1.5 adds SetNullHandling(); 2.0 keeps only the setter.
+// --- Function NULL handling: 1.5 has the `null_handling` field and
+// SetNullHandling(); 2.0 keeps only the setter.
 template <class F, class N>
 auto SetNullHandling(F &fn, N value, int) -> decltype(fn.SetNullHandling(value), void()) {
 	fn.SetNullHandling(value);
-}
-template <class F, class N>
-auto SetNullHandling(F &fn, N value, long) -> decltype(fn.null_handling = value, void()) {
-	fn.null_handling = value;
 }
 
 // --- DataChunk cardinality: on 2.0 vectors carry their own size, and
@@ -179,17 +162,10 @@ auto SetNullHandling(F &fn, N value, long) -> decltype(fn.null_handling = value,
 // fills rows with SetValue and then calls SetCardinality leaves its vectors at
 // size 0, and operators that read Vector::size() -- IS NULL among them -- return
 // garbage. SetChildCardinality also sizes the vectors. 1.5.6 backports it as an
-// alias of SetCardinality; 1.4 has only SetCardinality.
+// alias of SetCardinality.
 template <class CHUNK, class COUNT>
 auto SetChildCardinality(CHUNK &chunk, COUNT count, int) -> decltype(chunk.SetChildCardinality(count), void()) {
 	chunk.SetChildCardinality(count);
-}
-// Deliberately not SFINAE-constrained: naming SetCardinality in the signature
-// would raise 2.0's deprecation warning even where the overload above wins. The
-// body is only instantiated when this overload is chosen.
-template <class CHUNK, class COUNT>
-void SetChildCardinality(CHUNK &chunk, COUNT count, long) {
-	chunk.SetCardinality(count);
 }
 
 // 2.0 sizes vectors independently, so ToUnifiedFormat reads their size rather
@@ -260,8 +236,7 @@ void SetFallible(F &fn) {
 	detail::SetFallible(fn, 0);
 }
 
-//! fn.SetNullHandling(v) where available, else fn.null_handling = v. Works for
-//! scalar and aggregate functions.
+//! fn.SetNullHandling(v). Works for scalar and aggregate functions.
 template <class F, class N>
 void SetNullHandling(F &fn, N value) {
 	detail::SetNullHandling(fn, value, 0);

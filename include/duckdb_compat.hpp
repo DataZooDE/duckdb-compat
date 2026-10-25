@@ -729,10 +729,10 @@ inline duckdb::unique_ptr<duckdb::CreateMacroInfo> ScalarMacroInfo(const char *s
 }
 
 // --- Catalog identifiers ------------------------------------------------------------
-// Catalog, schema, table and column names are std::string on 1.4. 1.5.6 has an
-// Identifier type that converts implicitly to and from std::string (a backport
-// so that 2.0 spellings compile). On 2.0 both conversions are explicit, and
-// catalog APIs take and return Identifier.
+// On 1.5.6 most catalog names are still std::string, and its Identifier type
+// converts implicitly to and from std::string (a backport so that 2.0 spellings
+// compile). On 2.0 both conversions are explicit, and catalog APIs take and
+// return Identifier.
 
 //! A runtime string as the identifier type catalog APIs take: pass the result
 //! wherever 2.0 wants an Identifier (Catalog::GetCatalogEntry, GetSchema,
@@ -827,40 +827,15 @@ inline duckdb::unique_ptr<duckdb::UniqueConstraint> MakeUniqueConstraint(std::ve
 }
 
 // --- Qualified names of CreateInfo / DropInfo ---------------------------------------
-// 1.4: public `catalog`/`schema` fields plus a per-type name field (`table`,
-// `name`, `view_name`). 1.5.6: the same fields plus 2.0-style setters
-// (SetQualifiedName, CreateInfo::SetSchema/SetCatalog). 2.0: one private
+// 1.5.6: public `catalog`/`schema` fields plus 2.0-style setters (SetQualifiedName,
+// CreateInfo::SetSchema/SetCatalog; DropInfo has only SetQualifiedName, so its
+// schema and catalog still go through the fields). 2.0: one private
 // QualifiedName behind those setters, taking Identifiers.
 namespace detail {
-template <int N>
-struct Rank : Rank<N - 1> {};
-template <>
-struct Rank<0> {};
-
-template <class INFO>
-auto SetEntryNameField(INFO &info, const std::string &name, Rank<2>) -> decltype(info.table = name, void()) {
-	info.table = name;
-}
-template <class INFO>
-auto SetEntryNameField(INFO &info, const std::string &name, Rank<1>) -> decltype(info.view_name = name, void()) {
-	info.view_name = name;
-}
-template <class INFO>
-auto SetEntryNameField(INFO &info, const std::string &name, Rank<0>) -> decltype(info.name = name, void()) {
-	info.name = name;
-}
-
 template <class INFO, class QN = duckdb::QualifiedName>
 auto SetQualifiedName(INFO &info, const std::string &catalog, const std::string &schema, const std::string &name, int)
     -> decltype(info.SetQualifiedName(QN(Ident(catalog), Ident(schema), Ident(name))), void()) {
 	info.SetQualifiedName(QN(Ident(catalog), Ident(schema), Ident(name)));
-}
-template <class INFO>
-void SetQualifiedName(INFO &info, const std::string &catalog, const std::string &schema, const std::string &name,
-                      long) {
-	info.catalog = catalog;
-	info.schema = schema;
-	SetEntryNameField(info, name, Rank<2>());
 }
 
 template <class INFO>

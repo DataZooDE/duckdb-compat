@@ -180,6 +180,18 @@ void ToUnifiedFormat(VECTOR &vector, COUNT count, FORMAT &format, long) {
 	vector.ToUnifiedFormat(count, format);
 }
 
+// 2.0's Vector::Flatten() flattens the vector's own size rows and deprecates
+// Flatten(count), which ignores the count there. 1.5 has only Flatten(count).
+template <class VECTOR, class COUNT>
+auto Flatten(VECTOR &vector, COUNT, int) -> decltype(vector.Flatten(), void()) {
+	//! 2.0 ignores the supplied count: the producer must size its vector.
+	vector.Flatten();
+}
+template <class VECTOR, class COUNT>
+void Flatten(VECTOR &vector, COUNT count, long) {
+	vector.Flatten(count);
+}
+
 // --- ClientContext interrupt: 2.0 removed the public `interrupted` atomic --
 template <class C>
 auto IsInterrupted(const C &ctx, int) -> decltype(static_cast<bool>(ctx.IsInterrupted())) {
@@ -254,6 +266,13 @@ void SetChildCardinality(CHUNK &chunk, COUNT count) {
 template <class VECTOR, class COUNT, class FORMAT>
 void ToUnifiedFormat(VECTOR &vector, COUNT count, FORMAT &format) {
 	detail::ToUnifiedFormat(vector, count, format, 0);
+}
+
+//! Vector::Flatten() on 2.0 (the vector's own size; the deprecated
+//! Flatten(count) ignores the count there too); Flatten(count) on 1.x.
+template <class VECTOR, class COUNT>
+void Flatten(VECTOR &vector, COUNT count) {
+	detail::Flatten(vector, count, 0);
 }
 
 //! ctx.IsInterrupted() where available, else ctx.interrupted.

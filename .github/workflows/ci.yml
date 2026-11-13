@@ -61,6 +61,20 @@ jobs:
             clang++ -std=c++17 -fsyntax-only -Wall -Iinclude -Iduckdb/src/include "$probe"
             clang++ -std=c++17 -fsyntax-only -Wall -DIN= -DOUT= -DOPTIONAL= -DCALLBACK= -DCONST= -DVOID=void -DFAR= -DNEAR= -DPASCAL= -DWINAPI= -DCALLBACK= -DWINAPI= -DPASCAL= -DAPIENTRY= -DFAR= -DNEAR= -DCONST=const -Iinclude -Iduckdb/src/include "$probe"
           done
+      - name: Probe CREATE TRIGGER helper (definition set as a consumer's CMake does)
+        if: runner.os == 'Linux'
+        run: |
+          def=""
+          if [ -f duckdb/src/include/duckdb/execution/operator/schema/physical_create_trigger.hpp ]; then
+            def=-DDUCKDB_COMPAT_CREATE_TRIGGER
+            # without the definition the static_assert must fire on this line
+            if g++ -std=c++17 -fsyntax-only -Iinclude -Iduckdb/src/include test/trigger_probe.cpp 2>/dev/null; then
+              echo "::error::create_trigger.hpp compiled without DUCKDB_COMPAT_CREATE_TRIGGER on a DuckDB with triggers"
+              exit 1
+            fi
+          fi
+          g++ -std=c++17 -fsyntax-only -Wall $def -Iinclude -Iduckdb/src/include test/trigger_probe.cpp
+          clang++ -std=c++17 -fsyntax-only -Wall $def -Iinclude -Iduckdb/src/include test/trigger_probe.cpp
       - name: Probe httplib helpers (bundled httplib + OpenSSL)
         if: runner.os == 'Linux'
         run: g++ -std=c++17 -fsyntax-only -Iinclude -Iduckdb/src/include -Iduckdb/third_party/httplib test/probe_httplib.cpp
@@ -71,3 +85,5 @@ jobs:
         run: |
           cl /nologo /std:c++17 /EHsc /Zs /permissive- /Iinclude /Iduckdb\src\include test\probe.cpp
           cl /nologo /std:c++17 /EHsc /Zs /permissive- /Iinclude /Iduckdb\src\include test\filter_probe.cpp
+          $def = if (Test-Path duckdb\src\include\duckdb\execution\operator\schema\physical_create_trigger.hpp) { '/DDUCKDB_COMPAT_CREATE_TRIGGER' } else { '/DDUCKDB_COMPAT_NO_TRIGGER' }
+          cl /nologo /std:c++17 /EHsc /Zs /permissive- $def /Iinclude /Iduckdb\src\include test\trigger_probe.cpp

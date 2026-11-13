@@ -106,6 +106,20 @@ struct BothUnifiedVector {
 	void ToUnifiedFormat(int &format) { format = 20; }
 };
 
+struct OldFlattenVector {
+	unsigned long flattened = 0;
+	void Flatten(unsigned long count) { flattened = count; }
+};
+struct NewFlattenVector {
+	unsigned long flattened = 0;
+	void Flatten() { flattened = 20; }
+};
+struct BothFlattenVector {
+	unsigned long flattened = 0;
+	void Flatten(unsigned long) { flattened = 10; }
+	void Flatten() { flattened = 20; }
+};
+
 struct OldBind {
 	int value = 3;
 };
@@ -262,6 +276,15 @@ int main() {
 	BothUnifiedVector both_vector;
 	dc::ToUnifiedFormat(both_vector, 7UL, format);
 	assert(format == 20);
+	OldFlattenVector old_flatten;
+	dc::Flatten(old_flatten, 7UL);
+	assert(old_flatten.flattened == 7);
+	NewFlattenVector new_flatten;
+	dc::Flatten(new_flatten, 7UL);
+	assert(new_flatten.flattened == 20);
+	BothFlattenVector both_flatten;
+	dc::Flatten(both_flatten, 7UL);
+	assert(both_flatten.flattened == 20);
 
 	OldCtx oc;
 	assert(dc::IsInterrupted(oc));

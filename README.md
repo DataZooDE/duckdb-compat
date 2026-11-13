@@ -52,6 +52,9 @@ submodules when it builds.
 | `dc::ScalarMacroInfo(schema, name, "(a, b := 1) AS a + b")` | parses that `CREATE MACRO` | `DefaultMacro {schema, name, definition}` + `CreateInternalMacroInfo`. Table macros (`DefaultTableMacro`) are unchanged |
 | `dc::SetChildCardinality(chunk, n)` | `chunk.SetCardinality(n)` (1.5.6: `SetChildCardinality` is a backport alias) | `chunk.SetChildCardinality(n)`: vectors carry their own size; the deprecated `SetCardinality` leaves them at 0, and `IS NULL` over a scan's output then returns garbage |
 | `dc::ToUnifiedFormat(vector, n, format)` | `vector.ToUnifiedFormat(n, format)` | `vector.ToUnifiedFormat(format)`; 2.0 reads the vector's own size and deprecates the count-taking overload |
+| `dc::Flatten(vector, n)` | `vector.Flatten(n)` | `vector.Flatten()`: flattens the vector's own size rows; the deprecated `Flatten(n)` ignores `n` there too |
+| `dc::HasNull(vector, n)` | `VectorOperations::HasNull(vector, n)` | `VectorOperations::HasNull(vector)` over the vector's own size; like the deprecated count form, throws an `InternalException` when `n` differs from it |
+| `dc::CreateTriggerTarget(op)` (`duckdb_compat/create_trigger.hpp`) | always `std::nullopt` (no triggers) | `{catalog, schema, table}` of a `PhysicalCreateTrigger`'s table, as bound; `std::nullopt` for other operators. Needs `DUCKDB_COMPAT_CREATE_TRIGGER`, see below |
 | `dc::SetPathEncode(client, on)` | httplib `set_url_encode` | `set_path_encode` |
 | `dc::TlsContext(client)` | httplib `ssl_context()` | `tls_context()`; cast the `void*` to `SSL_CTX*` |
 | `dc::LoadSystemCerts(ssl_ctx)` (`duckdb_compat/httplib.hpp`) | `detail::load_system_certs_on_windows`, Windows only | `tls::load_system_certs`, every platform |
@@ -69,6 +72,19 @@ submodules when it builds.
 | `dc::AstTarget`, `dc::DmlNode`, `dc::MergeNode`, `dc::CteQuery`, `dc::Subquery`, `dc::ColumnNames`, `dc::FunctionName`, `dc::ForEachSetChild` (`duckdb_compat/sql_ast.hpp`) | public parser fields and direct DML statement fields | qualified names, accessors, and DML query nodes |
 | `dc::VisitDmlQuery` (`duckdb_compat/sql_ast.hpp`) | returns false (no DML query nodes) | dispatches UPDATE, DELETE, INSERT, MERGE and COPY query nodes to callbacks |
 | `dc::CreateTarget`, `dc::VisitLegacyLimitPercent` (`duckdb_compat/sql_ast.hpp`) | reads CREATE catalog/schema plus the local name and the legacy percent-limit modifier | reads CREATE's qualified name and the renamed legacy percent-limit modifier |
+
+`CreateTriggerTarget` needs the 2.0-only `physical_create_trigger.hpp`, so the
+consumer defines `DUCKDB_COMPAT_CREATE_TRIGGER` when the DuckDB tree it builds
+against has `src/include/duckdb/execution/operator/schema/physical_create_trigger.hpp`:
+
+```cmake
+if(EXISTS "${DuckDB_SOURCE_DIR}/src/include/duckdb/execution/operator/schema/physical_create_trigger.hpp")
+  add_definitions(-DDUCKDB_COMPAT_CREATE_TRIGGER)
+endif()
+```
+
+Including the header against a DuckDB whose `PhysicalOperatorType` has
+`CREATE_TRIGGER`, without the definition, fails a `static_assert`.
 
 `VisitDmlQuery` is enabled by `DUCKDB_COMPAT_DML_QUERY_NODES`, set only when
 the pinned DuckDB source tree has `update_query_node.hpp`. This avoids a

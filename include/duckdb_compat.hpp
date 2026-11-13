@@ -9,6 +9,8 @@
 #include "duckdb.hpp"
 #include "duckdb/common/file_opener.hpp"
 #include "duckdb/common/vector_operations/unary_executor.hpp"
+#include "duckdb/common/vector_operations/vector_operations.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/function/table_function.hpp"
 #include "duckdb/function/copy_function.hpp"
 #include "duckdb/main/query_result.hpp"
@@ -1104,6 +1106,32 @@ void SetVectorSize(V &, duckdb::idx_t, long) {
 //! Declare `count` rows of a flat vector filled in place (no-op before 2.0).
 inline void SetVectorSize(duckdb::Vector &vector, duckdb::idx_t count) {
 	detail::SetVectorSize(vector, count, 0);
+}
+
+// --- NULL checks over a vector -----------------------------------------------------------
+// 2.0 deprecates VectorOperations::HasNull(vector, count) for HasNull(vector),
+// which reads the vector's own size; the deprecated form throws an
+// InternalException when the count differs from that size. 1.5 has only the
+// count form. The 2.0 arm keeps the deprecated form's behaviour, check included.
+namespace detail {
+template <class OPS, class V>
+auto HasNull(V &vector, duckdb::idx_t count, int) -> decltype(OPS::HasNull(vector), vector.size(), bool()) {
+	if (count != vector.size()) {
+		throw duckdb::InternalException("HasNull: count (%llu) does not match vector size (%llu)", count,
+		                                vector.size());
+	}
+	return OPS::HasNull(vector);
+}
+template <class OPS, class V>
+bool HasNull(V &vector, duckdb::idx_t count, long) {
+	return OPS::HasNull(vector, count);
+}
+} // namespace detail
+
+//! True when one of the first `count` rows of `vector` is NULL (2.0: `count`
+//! must be the vector's size).
+inline bool HasNull(duckdb::Vector &vector, duckdb::idx_t count) {
+	return detail::HasNull<duckdb::VectorOperations>(vector, count, 0);
 }
 
 // --- Expression result type ---------------------------------------------------------------

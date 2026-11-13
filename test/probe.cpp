@@ -164,6 +164,14 @@ void ProbeUnifiedFormat(Vector &vector, UnifiedVectorFormat &format) {
 	duckdb_compat::ToUnifiedFormat(vector, 1, format);
 }
 
+void ProbeFlatten(Vector &vector) {
+	duckdb_compat::Flatten(vector, 1);
+}
+
+bool ProbeHasNull(Vector &vector) {
+	return duckdb_compat::HasNull(vector, 1);
+}
+
 void ProbeQuery(ClientContext &ctx) {
 	Connection con(*ctx.db);
 	auto res = con.Query("SELECT 1 AS a");
